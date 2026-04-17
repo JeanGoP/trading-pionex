@@ -60,8 +60,18 @@ class SistemaAction(BaseModel):
 # ============================================================
 @app.on_event("startup")
 async def startup_event():
+    global trading_task
     init_db()
     add_log("Servidor iniciado correctamente", "SUCCESS")
+
+    if PIONEX_API_KEY and PIONEX_SECRET:
+        sistema_estado["activo"] = True
+        trading_task = asyncio.create_task(
+            trading_loop(PIONEX_API_KEY, PIONEX_SECRET, TELEGRAM_TOKEN, TELEGRAM_CHAT)
+        )
+        add_log("Sistema iniciado automáticamente", "SUCCESS")
+    else:
+        add_log("API Key no configurada - inicia manualmente", "WARNING")
 
 
 # ============================================================
