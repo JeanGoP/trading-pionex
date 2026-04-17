@@ -1,14 +1,15 @@
 import requests
 import pandas as pd
+import numpy as np
 import time
 import hmac
 import hashlib
 import asyncio
 import os
 from datetime import datetime
-from ta.momentum import RSIIndicator
-from ta.trend import MACD
-from ta.volatility import BollingerBands
+from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.trend import MACD, EMAIndicator
+from ta.volatility import BollingerBands, AverageTrueRange
 from database import (
     SessionLocal, guardar_bot, cerrar_bot,
     guardar_ciclo, get_configuracion, get_estadisticas
@@ -24,7 +25,7 @@ sistema_estado = {
     "modo_prueba": True,
     "ciclo_actual": 0,
     "bots_activos": {},
-    "pares_activos": set(),  # FIX: evitar duplicados
+    "pares_activos": set(),
     "ultimo_analisis": None,
     "logs": [],
     "websocket_clients": set()
@@ -142,7 +143,6 @@ def scan_pairs(api_key: str, secret: str, config: dict):
         try:
             symbol = ticker.get("symbol", "")
 
-            # FIX: saltar pares que ya tienen bot activo
             if symbol in sistema_estado["pares_activos"]:
                 continue
 
@@ -173,7 +173,7 @@ def scan_pairs(api_key: str, secret: str, config: dict):
 
 
 # ============================================================
-# MODULO 2 - ANALIZADOR
+# MODULO 2 - ANALIZADOR CON ESTRATEGIA PROFESIONAL
 # ============================================================
 def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
@@ -207,6 +207,11 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100
 
 
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
+    """
+    Estrategia profesional de TRIPLE CONFLUENCIA:
+    Solo entra cuando RSI + MACD + Bollinger Bands coinciden.
+    Máximo 100 puntos. Mínimo 70 para entrar.
+    """
     symbol = pair_info["symbol"]
 
     df = get_klines(api_key, secret, symbol)
@@ -214,56 +219,135 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         return None
 
     try:
-        rsi = RSIIndicator(close=df["close"], window=14).rsi().iloc[-1]
+        # ── INDICADORES ──────────────────────────────────────
+        # RSI
+        rsi_series = RSIIndicator(close=df["close"], window=14).rsi()
+        rsi = rsi_series.iloc[-1]
+        rsi_prev = rsi_series.iloc[-2]
+        rsi_subiendo = rsi > rsi_prev
+
+        # MACD
         macd_obj = MACD(close=df["close"])
         macd_line = macd_obj.macd().iloc[-1]
         signal_line = macd_obj.macd_signal().iloc[-1]
-        bb = BollingerBands(close=df["close"], window=20)
-        bb_width = ((bb.bollinger_hband().iloc[-1] - bb.bollinger_lband().iloc[-1])
-                    / bb.bollinger_mavg().iloc[-1] * 100)
+        macd_hist = macd_obj.macd_diff().iloc[-1]
+        macd_hist_prev = macd_obj.macd_diff().iloc[-2]
+        macd_positivo = macd_hist > 0
+        macd_creciendo = macd_hist > macd_hist_prev
 
+        # Bollinger Bands
+        bb = BollingerBands(close=df["close"], window=20)
+        bb_high = bb.bollinger_hband().iloc[-1]
+        bb_low = bb.bollinger_lband().iloc[-1]
+        bb_mid = bb.bollinger_mavg().iloc[-1]
+        bb_width = ((bb_high - bb_low) / bb_mid * 100)
+        precio_actual = df["close"].iloc[-1]
+        distancia_media = abs(precio_actual - bb_mid) / bb_mid * 100
+
+        # EMA 50 y 200 — contexto de tendencia
+        ema50 = EMAIndicator(close=df["close"], window=50).ema_indicator().iloc[-1]
+        ema20 = EMAIndicator(close=df["close"], window=20).ema_indicator().iloc[-1]
+        precio_sobre_ema20 = precio_actual > ema20
+        precio_sobre_ema50 = precio_actual > ema50
+
+        # ATR — volatilidad real
+        atr = AverageTrueRange(
+            high=df["high"], low=df["low"], close=df["close"], window=14
+        ).average_true_range().iloc[-1]
+        atr_pct = (atr / precio_actual) * 100
+
+        # Volumen
         vol_avg = df["volume"].tail(20).mean()
         vol_current = df["volume"].iloc[-1]
         vol_ratio = vol_current / vol_avg if vol_avg > 0 else 0
+        vol_ultimas3 = df["volume"].tail(3).mean()
+        vol_creciente = vol_ultimas3 > vol_avg
 
-        # FIX: Score real basado en indicadores
+        # ── SISTEMA DE PUNTUACION PROFESIONAL ────────────────
         score = 0
+        razones = []
 
-        # RSI neutral es mejor para grilla neutral (entre 40-60 es ideal)
-        if 40 <= rsi <= 60:
-            score += 40
-        elif 30 <= rsi <= 70:
-            score += 20
-
-        # Bollinger Bands ancho medio = buena volatilidad para grilla
-        if 2.0 <= bb_width <= 8.0:
-            score += 30
-        elif 1.0 <= bb_width <= 12.0:
+        # 1. RSI (25 puntos)
+        if 40 <= rsi <= 55:
+            score += 25
+            razones.append(f"RSI óptimo ({round(rsi,1)})")
+        elif 35 <= rsi <= 60:
             score += 15
+            razones.append(f"RSI aceptable ({round(rsi,1)})")
+        elif 30 <= rsi <= 65:
+            score += 5
 
-        # Volumen estable
-        if 0.7 <= vol_ratio <= 1.5:
+        # 2. RSI subiendo = momentum positivo (15 puntos)
+        if rsi_subiendo and rsi < 60:
+            score += 15
+            razones.append("RSI en alza")
+
+        # 3. MACD confluencia (20 puntos)
+        if macd_positivo and macd_creciendo:
             score += 20
-
-        # Volumen alto = más liquidez
-        if pair_info["volume"] > 1_000_000:
+            razones.append("MACD positivo y creciendo")
+        elif macd_positivo or macd_creciendo:
             score += 10
 
-        add_log(f"{symbol}: RSI={round(rsi,1)} BB={round(bb_width,1)}% Score={score}", "INFO")
+        # 4. Bollinger Bands — zona ideal (20 puntos)
+        if 2.0 <= bb_width <= 6.0 and distancia_media < 1.5:
+            score += 20
+            razones.append(f"BB ideal ({round(bb_width,1)}%)")
+        elif 1.5 <= bb_width <= 8.0:
+            score += 10
 
-        # Solo retorna si tiene score mínimo de 30
-        if score < 30:
+        # 5. Volumen creciente (10 puntos)
+        if vol_creciente and vol_ratio > 1.0:
+            score += 10
+            razones.append("Volumen creciente")
+
+        # 6. Contexto de tendencia — EMAs (10 puntos)
+        if precio_sobre_ema20 and precio_sobre_ema50:
+            score += 10
+            razones.append("Precio sobre EMAs")
+        elif precio_sobre_ema20:
+            score += 5
+
+        # ── FILTROS DE DESCALIFICACION ────────────────────────
+        # ATR muy alto = demasiado riesgo para grilla
+        if atr_pct > 8.0:
+            add_log(f"{symbol}: ATR muy alto ({round(atr_pct,1)}%) - descartado", "WARNING")
+            return None
+
+        # RSI extremo = mercado sobrecomprado/sobrevendido
+        if rsi > 75 or rsi < 25:
+            add_log(f"{symbol}: RSI extremo ({round(rsi,1)}) - descartado", "WARNING")
+            return None
+
+        # BB demasiado estrecho = sin movimiento
+        if bb_width < 1.0:
+            add_log(f"{symbol}: BB muy estrecho ({round(bb_width,1)}%) - descartado", "WARNING")
+            return None
+
+        add_log(
+            f"{symbol}: Score={score} | RSI={round(rsi,1)} | MACD={'✓' if macd_positivo else '✗'} | "
+            f"BB={round(bb_width,1)}% | ATR={round(atr_pct,1)}%",
+            "INFO"
+        )
+
+        # Solo entra con score mínimo de 70
+        if score < 70:
             return None
 
         return {
             **pair_info,
             "rsi": round(rsi, 2),
+            "rsi_subiendo": rsi_subiendo,
             "macd": round(macd_line, 6),
             "signal": round(signal_line, 6),
+            "macd_hist": round(macd_hist, 6),
             "bb_width": round(bb_width, 2),
+            "atr_pct": round(atr_pct, 2),
             "vol_ratio": round(vol_ratio, 2),
-            "score": score
+            "score": score,
+            "razones": ", ".join(razones)
         }
+
     except Exception as e:
         add_log(f"Error analizando {symbol}: {e}", "ERROR")
         return None
@@ -274,7 +358,7 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
 # ============================================================
 def select_best_pairs(api_key: str, secret: str, candidates: list, config: dict):
     max_bots = int(config.get("max_active_bots", 2))
-    add_log(f"Analizando {min(len(candidates), 20)} candidatos con indicadores técnicos...", "INFO")
+    add_log(f"Analizando {min(len(candidates), 20)} candidatos con estrategia profesional...", "INFO")
 
     analyzed = []
     for pair in candidates[:20]:
@@ -284,14 +368,18 @@ def select_best_pairs(api_key: str, secret: str, candidates: list, config: dict)
         time.sleep(0.3)
 
     if not analyzed:
-        add_log("Ningún par pasó el análisis técnico", "WARNING")
+        add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
         return []
 
     analyzed.sort(key=lambda x: x["score"], reverse=True)
     best = analyzed[:max_bots]
 
     for p in best:
-        add_log(f"Par seleccionado: {p['symbol']} | Score: {p['score']} | RSI: {p['rsi']}", "SUCCESS")
+        add_log(
+            f"✅ Par seleccionado: {p['symbol']} | Score: {p['score']} | "
+            f"RSI: {p['rsi']} | Razones: {p.get('razones', '')}",
+            "SUCCESS"
+        )
 
     return best
 
@@ -310,7 +398,6 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
     stop_loss = float(config.get("stop_loss_pct", 5.0))
     modo_prueba = config.get("modo_prueba", "true") == "true"
 
-    # FIX: verificar duplicados
     if symbol in sistema_estado["pares_activos"]:
         add_log(f"Ya existe un bot activo para {symbol}, saltando...", "WARNING")
         return None
@@ -344,12 +431,12 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         db.close()
 
         sistema_estado["bots_activos"][bot_id] = bot_data
-        sistema_estado["pares_activos"].add(symbol)  # FIX: registrar par activo
+        sistema_estado["pares_activos"].add(symbol)
 
         add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {pair_info.get('score', 0)}", "SUCCESS")
 
         notify(
-            f"🧪 <b>[PRUEBA] Bot simulado</b>\n\n"
+            f"🧪 <b>[PRUEBA] Bot simulado — Estrategia Pro</b>\n\n"
             f"📊 Par: <b>{symbol}</b>\n"
             f"💵 Precio: <b>${price}</b>\n"
             f"📈 Rango: <b>${lower} — ${upper}</b>\n"
@@ -359,7 +446,9 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             f"🛑 Stop Loss: <b>{stop_loss}%</b>\n"
             f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
             f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
-            f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n\n"
+            f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n"
+            f"⚡ ATR: <b>{pair_info.get('atr_pct', 0)}%</b>\n"
+            f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>\n\n"
             f"⚠️ <i>Simulación - no es dinero real</i>"
         )
         return bot_id
@@ -390,17 +479,18 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             db.close()
 
             sistema_estado["bots_activos"][bot_id] = bot_data
-            sistema_estado["pares_activos"].add(symbol)  # FIX: registrar par activo
+            sistema_estado["pares_activos"].add(symbol)
 
             add_log(f"Bot abierto: {symbol} | ID: {bot_id}", "SUCCESS")
 
             notify(
-                f"🤖 <b>Bot abierto</b>\n\n"
+                f"🤖 <b>Bot abierto — Estrategia Pro</b>\n\n"
                 f"📊 Par: <b>{symbol}</b>\n"
                 f"💵 Precio: <b>${price}</b>\n"
                 f"📈 Rango: <b>${lower} — ${upper}</b>\n"
                 f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
-                f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>"
+                f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
+                f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>"
             )
             return bot_id
         else:
@@ -433,7 +523,7 @@ def monitor_bots(api_key: str, secret: str, config: dict):
 
     bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
     pares_corriendo = {b.get("symbol") for b in bots_corriendo}
-    sistema_estado["pares_activos"] = pares_corriendo  # FIX: sincronizar pares activos
+    sistema_estado["pares_activos"] = pares_corriendo
     add_log(f"Bots activos en Pionex: {len(bots_corriendo)}/{max_bots}", "INFO")
 
     if len(bots_corriendo) < max_bots:
@@ -473,8 +563,8 @@ def run_cycle(api_key: str, secret: str, config: dict):
 
     best_pairs = select_best_pairs(api_key, secret, candidates, config)
     if not best_pairs:
-        add_log("Ningún par pasó el análisis técnico", "WARNING")
-        notify("⚠️ <b>Ningún par pasó el análisis técnico</b>\nEl sistema seguirá monitoreando.")
+        add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
+        notify("⚠️ <b>Ningún par pasó la estrategia profesional</b>\nEl sistema seguirá monitoreando.")
         return
 
     bots_abiertos = 0
@@ -501,9 +591,11 @@ def run_cycle(api_key: str, secret: str, config: dict):
 # LOOP PRINCIPAL ASINCRONO
 # ============================================================
 async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_chat: str):
-    add_log("Sistema de trading iniciado", "SUCCESS")
+    add_log("Sistema de trading iniciado con Estrategia Profesional", "SUCCESS")
     notify(
-        f"🚀 <b>Sistema de Trading iniciado</b>\n\n"
+        f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
+        f"🎯 <b>Triple Confluencia:</b> RSI + MACD + Bollinger Bands\n"
+        f"📊 Score mínimo para entrar: <b>70/100</b>\n"
         f"⚙️ Modo: <b>{'PRUEBA' if sistema_estado['modo_prueba'] else 'REAL'}</b>\n"
         f"⏰ Análisis cada 30 minutos"
     )
