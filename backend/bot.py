@@ -4,6 +4,7 @@ import time
 import hmac
 import hashlib
 import asyncio
+import os
 from datetime import datetime
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
@@ -12,27 +13,10 @@ from database import (
     SessionLocal, guardar_bot, cerrar_bot,
     guardar_ciclo, get_configuracion, get_estadisticas
 )
-import os
 
+PIONEX_BASE_URL = "https://api.pionex.com"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
-
-def notify(message: str):
-    """Función simplificada para enviar a Telegram"""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        add_log("Telegram no configurado", "WARNING")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=10)
-        add_log("Telegram enviado OK", "SUCCESS")
-    except Exception as e:
-        add_log(f"Error Telegram: {e}", "ERROR")
-PIONEX_BASE_URL = "https://api.pionex.com"
 
 # Estado global del sistema
 sistema_estado = {
@@ -40,6 +24,7 @@ sistema_estado = {
     "modo_prueba": True,
     "ciclo_actual": 0,
     "bots_activos": {},
+    "pares_activos": set(),  # FIX: evitar duplicados
     "ultimo_analisis": None,
     "logs": [],
     "websocket_clients": set()
@@ -63,7 +48,6 @@ def add_log(mensaje: str, tipo: str = "INFO"):
 
 
 async def broadcast_update(data: dict):
-    """Envía actualizaciones a todos los clientes WebSocket conectados"""
     if sistema_estado["websocket_clients"]:
         import json
         message = json.dumps(data)
@@ -79,17 +63,27 @@ async def broadcast_update(data: dict):
 # ============================================================
 # TELEGRAM
 # ============================================================
-def send_telegram(token: str, chat_id: str, message: str):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+def notify(message: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+        add_log("Telegram no configurado", "WARNING")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        requests.post(url, json=payload, timeout=10)
+        r = requests.post(url, json={
+            "chat_id": TELEGRAM_CHAT,
+            "text": message,
+            "parse_mode": "HTML"
+        }, timeout=10)
+        if r.status_code == 200:
+            add_log("Telegram enviado OK", "SUCCESS")
+        else:
+            add_log(f"Telegram error: {r.text[:100]}", "ERROR")
     except Exception as e:
         add_log(f"Error Telegram: {e}", "ERROR")
+
+
+def send_telegram(token: str, chat_id: str, message: str):
+    notify(message)
 
 
 # ============================================================
@@ -147,6 +141,11 @@ def scan_pairs(api_key: str, secret: str, config: dict):
     for ticker in usdt_pairs:
         try:
             symbol = ticker.get("symbol", "")
+
+            # FIX: saltar pares que ya tienen bot activo
+            if symbol in sistema_estado["pares_activos"]:
+                continue
+
             volume = float(ticker.get("amount", 0))
             close = float(ticker.get("close", 0))
             open_price = float(ticker.get("open", 0))
@@ -206,12 +205,12 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100
         add_log(f"Error parseando klines de {symbol}: {e}", "ERROR")
         return None
 
+
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
     symbol = pair_info["symbol"]
 
     df = get_klines(api_key, secret, symbol)
     if df is None or len(df) < 50:
-        add_log(f"{symbol}: Sin datos suficientes", "WARNING")
         return None
 
     try:
@@ -227,8 +226,7 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         vol_current = df["volume"].iloc[-1]
         vol_ratio = vol_current / vol_avg if vol_avg > 0 else 0
 
-        add_log(f"{symbol}: RSI={round(rsi,1)} BB={round(bb_width,1)}% vol_ratio={round(vol_ratio,2)}", "INFO")
-
+        # FIX: Score real basado en indicadores
         score = 0
 
         # RSI neutral es mejor para grilla neutral (entre 40-60 es ideal)
@@ -250,6 +248,8 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         # Volumen alto = más liquidez
         if pair_info["volume"] > 1_000_000:
             score += 10
+
+        add_log(f"{symbol}: RSI={round(rsi,1)} BB={round(bb_width,1)}% Score={score}", "INFO")
 
         # Solo retorna si tiene score mínimo de 30
         if score < 30:
@@ -310,6 +310,11 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
     stop_loss = float(config.get("stop_loss_pct", 5.0))
     modo_prueba = config.get("modo_prueba", "true") == "true"
 
+    # FIX: verificar duplicados
+    if symbol in sistema_estado["pares_activos"]:
+        add_log(f"Ya existe un bot activo para {symbol}, saltando...", "WARNING")
+        return None
+
     lower = round(price * (1 - range_pct / 100), 6)
     upper = round(price * (1 + range_pct / 100), 6)
 
@@ -339,16 +344,23 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         db.close()
 
         sistema_estado["bots_activos"][bot_id] = bot_data
-        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Rango: ${lower}-${upper}", "SUCCESS")
-    
+        sistema_estado["pares_activos"].add(symbol)  # FIX: registrar par activo
+
+        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {pair_info.get('score', 0)}", "SUCCESS")
+
         notify(
             f"🧪 <b>[PRUEBA] Bot simulado</b>\n\n"
             f"📊 Par: <b>{symbol}</b>\n"
             f"💵 Precio: <b>${price}</b>\n"
             f"📈 Rango: <b>${lower} — ${upper}</b>\n"
+            f"🔢 Grillas: <b>{grid_count}</b>\n"
+            f"⚡ Apalancamiento: <b>{leverage}x</b>\n"
+            f"✅ Take Profit: <b>{take_profit}%</b>\n"
+            f"🛑 Stop Loss: <b>{stop_loss}%</b>\n"
             f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
             f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
-            f"⚠️ Simulación - no es dinero real"
+            f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n\n"
+            f"⚠️ <i>Simulación - no es dinero real</i>"
         )
         return bot_id
 
@@ -378,7 +390,18 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             db.close()
 
             sistema_estado["bots_activos"][bot_id] = bot_data
+            sistema_estado["pares_activos"].add(symbol)  # FIX: registrar par activo
+
             add_log(f"Bot abierto: {symbol} | ID: {bot_id}", "SUCCESS")
+
+            notify(
+                f"🤖 <b>Bot abierto</b>\n\n"
+                f"📊 Par: <b>{symbol}</b>\n"
+                f"💵 Precio: <b>${price}</b>\n"
+                f"📈 Rango: <b>${lower} — ${upper}</b>\n"
+                f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
+                f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>"
+            )
             return bot_id
         else:
             add_log(f"Error abriendo bot en {symbol}", "ERROR")
@@ -409,6 +432,8 @@ def monitor_bots(api_key: str, secret: str, config: dict):
         return
 
     bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
+    pares_corriendo = {b.get("symbol") for b in bots_corriendo}
+    sistema_estado["pares_activos"] = pares_corriendo  # FIX: sincronizar pares activos
     add_log(f"Bots activos en Pionex: {len(bots_corriendo)}/{max_bots}", "INFO")
 
     if len(bots_corriendo) < max_bots:
@@ -449,6 +474,7 @@ def run_cycle(api_key: str, secret: str, config: dict):
     best_pairs = select_best_pairs(api_key, secret, candidates, config)
     if not best_pairs:
         add_log("Ningún par pasó el análisis técnico", "WARNING")
+        notify("⚠️ <b>Ningún par pasó el análisis técnico</b>\nEl sistema seguirá monitoreando.")
         return
 
     bots_abiertos = 0
@@ -476,6 +502,11 @@ def run_cycle(api_key: str, secret: str, config: dict):
 # ============================================================
 async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_chat: str):
     add_log("Sistema de trading iniciado", "SUCCESS")
+    notify(
+        f"🚀 <b>Sistema de Trading iniciado</b>\n\n"
+        f"⚙️ Modo: <b>{'PRUEBA' if sistema_estado['modo_prueba'] else 'REAL'}</b>\n"
+        f"⏰ Análisis cada 30 minutos"
+    )
     ciclo_counter = 0
 
     while sistema_estado["activo"]:
@@ -509,3 +540,4 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             await asyncio.sleep(60)
 
     add_log("Sistema de trading detenido", "WARNING")
+    notify("🛑 <b>Sistema de Trading detenido</b>")
