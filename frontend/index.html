@@ -29,7 +29,6 @@
       min-height: 100vh;
     }
 
-    /* HEADER */
     header {
       background: var(--bg2);
       border-bottom: 1px solid var(--border);
@@ -113,14 +112,12 @@
       border-color: rgba(46, 213, 115, 0.3);
     }
 
-    /* LAYOUT */
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
     }
 
-    /* METRIC CARDS */
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -140,9 +137,7 @@
     .metric-card::before {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
+      top: 0; left: 0; right: 0;
       height: 3px;
       background: var(--accent);
     }
@@ -166,20 +161,15 @@
       margin-bottom: 4px;
     }
 
-    .metric-sub {
-      font-size: 12px;
-      color: var(--text2);
-    }
+    .metric-sub { font-size: 12px; color: var(--text2); }
 
     .metric-icon {
       position: absolute;
-      top: 20px;
-      right: 20px;
+      top: 20px; right: 20px;
       font-size: 24px;
       opacity: 0.3;
     }
 
-    /* MAIN GRID */
     .main-grid {
       display: grid;
       grid-template-columns: 1fr 380px;
@@ -187,7 +177,6 @@
       margin-bottom: 20px;
     }
 
-    /* CARDS */
     .card {
       background: var(--bg2);
       border: 1px solid var(--border);
@@ -203,17 +192,9 @@
       justify-content: space-between;
     }
 
-    .card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text);
-    }
+    .card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+    .card-body { padding: 20px; }
 
-    .card-body {
-      padding: 20px;
-    }
-
-    /* CONTROLS */
     .controls-panel {
       display: flex;
       flex-direction: column;
@@ -232,40 +213,16 @@
     }
 
     .btn:active { transform: scale(0.98); }
-
-    .btn-success {
-      background: var(--success);
-      color: #000;
-    }
-
+    .btn-success { background: var(--success); color: #000; }
     .btn-success:hover { background: #26c065; }
-
-    .btn-danger {
-      background: var(--danger);
-      color: #fff;
-    }
-
+    .btn-danger { background: var(--danger); color: #fff; }
     .btn-danger:hover { background: #e03347; }
-
-    .btn-primary {
-      background: var(--accent2);
-      color: #fff;
-    }
-
+    .btn-primary { background: var(--accent2); color: #fff; }
     .btn-primary:hover { background: #0077e6; }
-
-    .btn-outline {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
+    .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
     .btn-outline:hover { background: var(--bg3); }
 
-    /* CONFIG */
-    .config-item {
-      margin-bottom: 12px;
-    }
+    .config-item { margin-bottom: 12px; }
 
     .config-label {
       font-size: 12px;
@@ -294,12 +251,7 @@
       padding: 8px 0;
     }
 
-    .toggle {
-      position: relative;
-      width: 44px;
-      height: 24px;
-    }
-
+    .toggle { position: relative; width: 44px; height: 24px; }
     .toggle input { opacity: 0; width: 0; height: 0; }
 
     .toggle-slider {
@@ -315,22 +267,16 @@
     .toggle-slider::before {
       content: '';
       position: absolute;
-      width: 18px;
-      height: 18px;
-      left: 2px;
-      top: 2px;
+      width: 18px; height: 18px;
+      left: 2px; top: 2px;
       background: var(--text2);
       border-radius: 50%;
       transition: 0.2s;
     }
 
     .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-    .toggle input:checked + .toggle-slider::before {
-      transform: translateX(20px);
-      background: #000;
-    }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); background: #000; }
 
-    /* LOGS */
     .logs-container {
       height: 280px;
       overflow-y: auto;
@@ -357,14 +303,9 @@
     .log-tipo.ERROR { color: var(--danger); }
     .log-msg { color: var(--text); }
 
-    /* BOTS TABLE */
     .table-wrapper { overflow-x: auto; }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
     th {
       padding: 10px 12px;
@@ -384,13 +325,7 @@
 
     tr:hover td { background: rgba(255,255,255,0.02); }
 
-    .badge {
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
+    .badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
     .badge-success { background: rgba(46,213,115,0.15); color: var(--success); }
     .badge-danger { background: rgba(255,71,87,0.15); color: var(--danger); }
     .badge-warning { background: rgba(255,165,2,0.15); color: var(--warning); }
@@ -399,20 +334,14 @@
     .positive { color: var(--success); }
     .negative { color: var(--danger); }
 
-    /* CHART */
-    .chart-wrapper {
-      position: relative;
-      height: 200px;
-    }
+    .chart-wrapper { position: relative; height: 200px; }
 
-    /* BOTTOM GRID */
     .bottom-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
     }
 
-    /* RESPONSIVE */
     @media (max-width: 1024px) {
       .metrics-grid { grid-template-columns: repeat(2, 1fr); }
       .main-grid { grid-template-columns: 1fr; }
@@ -424,7 +353,6 @@
       .container { padding: 1rem; }
     }
 
-    /* LOADING */
     .loading {
       display: flex;
       align-items: center;
@@ -435,8 +363,7 @@
     }
 
     .spinner {
-      width: 20px;
-      height: 20px;
+      width: 20px; height: 20px;
       border: 2px solid var(--border);
       border-top-color: var(--accent);
       border-radius: 50%;
@@ -446,11 +373,9 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* NOTIFICATION */
     .notification {
       position: fixed;
-      bottom: 24px;
-      right: 24px;
+      bottom: 24px; right: 24px;
       padding: 12px 20px;
       border-radius: 8px;
       font-size: 13px;
@@ -461,20 +386,12 @@
       transition: all 0.3s;
     }
 
-    .notification.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
-
+    .notification.show { transform: translateY(0); opacity: 1; }
     .notification.success { background: var(--success); color: #000; }
     .notification.error { background: var(--danger); color: #fff; }
     .notification.info { background: var(--accent2); color: #fff; }
 
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 12px 0;
-    }
+    .divider { height: 1px; background: var(--border); margin: 12px 0; }
 
     .ultimo-analisis {
       font-size: 11px;
@@ -482,11 +399,45 @@
       text-align: center;
       padding: 8px;
     }
+
+    .countdown-wrapper {
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    .countdown-label {
+      font-size: 11px;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+
+    .countdown-timer {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 2px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .progress-track {
+      height: 4px;
+      background: var(--bg3);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 1s linear;
+    }
   </style>
 </head>
 <body>
 
-<!-- HEADER -->
 <header>
   <div class="logo">
     <div class="logo-icon">📈</div>
@@ -501,10 +452,8 @@
   </div>
 </header>
 
-<!-- MAIN CONTENT -->
 <div class="container">
 
-  <!-- METRICS -->
   <div class="metrics-grid">
     <div class="metric-card">
       <div class="metric-icon">🤖</div>
@@ -532,17 +481,14 @@
     </div>
   </div>
 
-  <!-- MAIN GRID -->
   <div class="main-grid">
 
-    <!-- IZQUIERDA: Chart + Logs -->
-    <div style="display: flex; flex-direction: column; gap: 20px;">
+    <div style="display:flex;flex-direction:column;gap:20px;">
 
-      <!-- CHART -->
       <div class="card">
         <div class="card-header">
           <span class="card-title">Ganancias acumuladas</span>
-          <span style="font-size:12px;color:var(--text2)" id="chart-subtitle">Últimas operaciones</span>
+          <span style="font-size:12px;color:var(--text2)">Últimas operaciones</span>
         </div>
         <div class="card-body">
           <div class="chart-wrapper">
@@ -551,7 +497,6 @@
         </div>
       </div>
 
-      <!-- LOGS -->
       <div class="card">
         <div class="card-header">
           <span class="card-title">Logs del sistema</span>
@@ -568,10 +513,8 @@
       </div>
     </div>
 
-    <!-- DERECHA: Controls + Config -->
-    <div style="display: flex; flex-direction: column; gap: 20px;">
+    <div style="display:flex;flex-direction:column;gap:20px;">
 
-      <!-- CONTROLS -->
       <div class="card">
         <div class="card-header">
           <span class="card-title">Control del sistema</span>
@@ -601,11 +544,19 @@
             <div class="ultimo-analisis" id="ultimo-analisis">
               Último análisis: --
             </div>
+
+            <div class="countdown-wrapper">
+              <div class="countdown-label">Próximo análisis en</div>
+              <div class="countdown-timer" id="countdown">--:--</div>
+              <div class="progress-track">
+                <div class="progress-fill" id="progress-bar"></div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
 
-      <!-- CONFIG -->
       <div class="card">
         <div class="card-header">
           <span class="card-title">Configuración</span>
@@ -645,10 +596,8 @@
     </div>
   </div>
 
-  <!-- BOTTOM: Bots + Ganancias -->
   <div class="bottom-grid">
 
-    <!-- BOTS -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Historial de bots</span>
@@ -668,16 +617,13 @@
               </tr>
             </thead>
             <tbody id="bots-table">
-              <tr>
-                <td colspan="6" class="loading">Sin datos aún</td>
-              </tr>
+              <tr><td colspan="6" class="loading">Sin datos aún</td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- GANANCIAS -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Historial de ganancias</span>
@@ -696,9 +642,7 @@
               </tr>
             </thead>
             <tbody id="ganancias-table">
-              <tr>
-                <td colspan="5" class="loading">Sin datos aún</td>
-              </tr>
+              <tr><td colspan="5" class="loading">Sin datos aún</td></tr>
             </tbody>
           </table>
         </div>
@@ -707,7 +651,6 @@
   </div>
 </div>
 
-<!-- NOTIFICATION -->
 <div class="notification" id="notification"></div>
 
 <script>
@@ -715,15 +658,42 @@
   let ws = null;
   let gananciaChart = null;
   let gananciaData = [];
+  let proximoAnalisis = null;
+  let countdownInterval = null;
+  const INTERVALO_MS = 30 * 60 * 1000;
+
+  // ============================================================
+  // CUENTA REGRESIVA
+  // ============================================================
+  function iniciarCuentaRegresiva() {
+    proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
+    if (countdownInterval) clearInterval(countdownInterval);
+
+    countdownInterval = setInterval(() => {
+      const diff = proximoAnalisis - new Date();
+
+      if (diff <= 0) {
+        proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
+        return;
+      }
+
+      const minutos = Math.floor(diff / 60000);
+      const segundos = Math.floor((diff % 60000) / 1000);
+      const progreso = ((INTERVALO_MS - diff) / INTERVALO_MS) * 100;
+
+      document.getElementById('countdown').textContent =
+        `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
+      document.getElementById('progress-bar').style.width = progreso + '%';
+    }, 1000);
+  }
 
   // ============================================================
   // WEBSOCKET
   // ============================================================
   function conectarWS() {
-    ws = new WebSocket('https://trading-pionex.onrender.com/ws');
+    ws = new WebSocket('wss://trading-pionex.onrender.com/ws');
 
     ws.onopen = () => {
-      console.log('WebSocket conectado');
       addLog({ timestamp: new Date().toLocaleTimeString(), tipo: 'SUCCESS', mensaje: 'Conectado al servidor' });
     };
 
@@ -738,6 +708,7 @@
         if (msg.data.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.data.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.data.ultimo_analisis;
+          iniciarCuentaRegresiva();
         }
       }
 
@@ -746,15 +717,13 @@
         if (msg.logs) renderLogs(msg.logs);
         if (msg.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.ultimo_analisis;
+          document.getElementById('m-ultimo').textContent = 'Último: ' + msg.ultimo_analisis;
+          iniciarCuentaRegresiva();
         }
       }
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket desconectado. Reconectando...');
-      setTimeout(conectarWS, 3000);
-    };
-
+    ws.onclose = () => setTimeout(conectarWS, 3000);
     ws.onerror = () => ws.close();
 
     setInterval(() => {
@@ -813,20 +782,20 @@
       text.textContent = 'Activo';
       btnIniciar.disabled = true;
       btnDetener.disabled = false;
+      iniciarCuentaRegresiva();
     } else {
       dot.classList.remove('active');
       text.textContent = 'Inactivo';
       btnIniciar.disabled = false;
       btnDetener.disabled = true;
+      if (countdownInterval) clearInterval(countdownInterval);
+      document.getElementById('countdown').textContent = '--:--';
+      document.getElementById('progress-bar').style.width = '0%';
     }
 
-    if (modoPrueba) {
-      badge.textContent = 'PRUEBA';
-      badge.classList.remove('real');
-    } else {
-      badge.textContent = 'REAL';
-      badge.classList.add('real');
-    }
+    badge.textContent = modoPrueba ? 'PRUEBA' : 'REAL';
+    if (modoPrueba) badge.classList.remove('real');
+    else badge.classList.add('real');
   }
 
   function renderLogs(logs) {
@@ -845,10 +814,7 @@
       <span class="log-msg">${log.mensaje}</span>
     `;
     container.insertBefore(item, container.firstChild);
-
-    while (container.children.length > 100) {
-      container.removeChild(container.lastChild);
-    }
+    while (container.children.length > 100) container.removeChild(container.lastChild);
   }
 
   function clearLogs() {
@@ -881,14 +847,8 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: {
-            ticks: { color: '#8b8fa8', font: { size: 10 } },
-            grid: { color: 'rgba(255,255,255,0.05)' }
-          },
-          y: {
-            ticks: { color: '#8b8fa8', font: { size: 10 }, callback: v => '$' + v.toFixed(4) },
-            grid: { color: 'rgba(255,255,255,0.05)' }
-          }
+          x: { ticks: { color: '#8b8fa8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#8b8fa8', font: { size: 10 }, callback: v => '$' + v.toFixed(4) }, grid: { color: 'rgba(255,255,255,0.05)' } }
         }
       }
     });
@@ -918,7 +878,8 @@
 
       tbody.innerHTML = bots.map(b => `
         <tr>
-          <td><strong>${b.symbol.replace('_USDT', '')}</strong><br><span style="font-size:10px;color:var(--text2)">${b.modo_prueba ? '🧪' : '💰'}</span></td>
+          <td><strong>${b.symbol.replace('_USDT', '')}</strong><br>
+          <span style="font-size:10px;color:var(--text2)">${b.modo_prueba ? '🧪' : '💰'}</span></td>
           <td>$${b.precio_entrada.toFixed(4)}</td>
           <td><span class="badge badge-info">${b.score}</span></td>
           <td>${b.rsi}</td>
@@ -926,9 +887,7 @@
           <td class="${b.ganancia >= 0 ? 'positive' : 'negative'}">$${b.ganancia.toFixed(4)}</td>
         </tr>
       `).join('');
-    } catch (e) {
-      console.error('Error cargando bots:', e);
-    }
+    } catch (e) { console.error('Error cargando bots:', e); }
   }
 
   async function cargarGanancias() {
@@ -952,9 +911,7 @@
           <td style="font-size:11px;color:var(--text2)">${g.fecha ? g.fecha.substring(11,19) : '--'}</td>
         </tr>
       `).join('');
-    } catch (e) {
-      console.error('Error cargando ganancias:', e);
-    }
+    } catch (e) { console.error('Error cargando ganancias:', e); }
   }
 
   // ============================================================
@@ -962,12 +919,11 @@
   // ============================================================
   async function iniciarSistema() {
     try {
-      const res = await fetch(`${API}/api/sistema`, {
+      await fetch(`${API}/api/sistema`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'iniciar' })
       });
-      const data = await res.json();
       actualizarEstado(true, document.getElementById('toggle-prueba').checked);
       showNotification('Sistema iniciado correctamente', 'success');
     } catch (e) {
@@ -977,7 +933,7 @@
 
   async function detenerSistema() {
     try {
-      const res = await fetch(`${API}/api/sistema`, {
+      await fetch(`${API}/api/sistema`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'detener' })
@@ -997,6 +953,7 @@
         body: JSON.stringify({ accion: 'ciclo_manual' })
       });
       showNotification('Análisis manual iniciado', 'info');
+      iniciarCuentaRegresiva();
     } catch (e) {
       showNotification('Error iniciando análisis', 'error');
     }
@@ -1029,7 +986,6 @@
       grid_count: document.getElementById('cfg-grids').value,
       max_active_bots: document.getElementById('cfg-maxbots').value
     };
-
     try {
       await fetch(`${API}/api/configuracion/batch`, {
         method: 'PUT',
