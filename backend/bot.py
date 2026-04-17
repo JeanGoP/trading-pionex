@@ -111,9 +111,9 @@ def pionex_request(api_key: str, secret: str, method: str, endpoint: str, params
 # ============================================================
 def scan_pairs(api_key: str, secret: str, config: dict):
     add_log("Escaneando pares del mercado...", "INFO")
-    min_volume = float(config.get("min_volume_24h", 5000000))
-    min_vol = float(config.get("min_volatility", 2.0))
-    max_vol = float(config.get("max_volatility", 8.0))
+    min_volume = 500000
+    min_vol = 0.1
+    max_vol = 20.0
 
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
     if not response or not response.get("result"):
@@ -173,9 +173,8 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="1h", limit=100)
 
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
     symbol = pair_info["symbol"]
-    rsi_min = float(config.get("rsi_min", 35))
-    rsi_max = float(config.get("rsi_max", 65))
-
+    rsi_min = 20
+    rsi_max = 80
     df = get_klines(api_key, secret, symbol)
     if df is None or len(df) < 50:
         return None
