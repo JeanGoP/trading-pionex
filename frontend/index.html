@@ -307,7 +307,7 @@
 
     if (ultimoAnalisisStr) {
       // Convertir "2026-04-17 20:42:10" a timestamp
-      const fechaServidor = new Date(ultimoAnalisisStr.replace(' ', 'T')).getTime();
+      const fechaServidor = new Date(ultimoAnalisisStr.replace(' ', 'T') + 'Z').getTime();
       const transcurrido = ahora - fechaServidor;
       const restante = INTERVALO_MS - transcurrido;
       proximoAnalisis = restante > 0
