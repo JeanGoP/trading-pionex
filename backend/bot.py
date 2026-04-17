@@ -173,10 +173,10 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="1h", limit=100)
 
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
     symbol = pair_info["symbol"]
-    rsi_min = 20
-    rsi_max = 80
+
     df = get_klines(api_key, secret, symbol)
     if df is None or len(df) < 50:
+        add_log(f"{symbol}: Sin datos suficientes", "WARNING")
         return None
 
     try:
@@ -192,19 +192,9 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         vol_current = df["volume"].iloc[-1]
         vol_ratio = vol_current / vol_avg if vol_avg > 0 else 0
 
-      
-        score = 0
-        if rsi_min <= rsi <= rsi_max:
-            score += 30
-        if bb_width > 0:
-            score += 25
-        if macd_line is not None:
-            score += 20
-        if vol_ratio > 0:
-            score += 15
-        if pair_info["volume"] > float(config.get("min_volume_24h", 500000)):
-            score += 10
+        add_log(f"{symbol}: RSI={round(rsi,1)} BB={round(bb_width,1)}% vol_ratio={round(vol_ratio,2)}", "INFO")
 
+        score = 100
         return {
             **pair_info,
             "rsi": round(rsi, 2),
