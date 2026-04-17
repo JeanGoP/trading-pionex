@@ -157,18 +157,36 @@ def scan_pairs(api_key: str, secret: str, config: dict):
 # ============================================================
 # MODULO 2 - ANALIZADOR
 # ============================================================
-def get_klines(api_key: str, secret: str, symbol: str, interval="1h", limit=100):
+def get_klines(api_key: str, secret: str, symbol: str, interval="1h", limit=50):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/klines", params=params)
-    if response and response.get("result"):
-        data = response.get("data", {}).get("klines", [])
-        if data:
-            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df[["open", "high", "low", "close", "volume"]] = df[
-                ["open", "high", "low", "close", "volume"]
-            ].astype(float)
-            return df
-    return None
+    
+    if not response:
+        return None
+
+    if not response.get("result"):
+        add_log(f"API error para {symbol}: {response}", "ERROR")
+        return None
+
+    data = response.get("data", {})
+    
+    # Intentar diferentes estructuras de respuesta
+    klines = data.get("klines") or data.get("candles") or data.get("data") or []
+    
+    if not klines or len(klines) < 20:
+        return None
+
+    try:
+        df = pd.DataFrame(klines)
+        if len(df.columns) >= 6:
+            df.columns = ["timestamp", "open", "high", "low", "close", "volume"] + list(df.columns[6:])
+        df[["open", "high", "low", "close", "volume"]] = df[
+            ["open", "high", "low", "close", "volume"]
+        ].astype(float)
+        return df
+    except Exception as e:
+        add_log(f"Error parseando klines de {symbol}: {e}", "ERROR")
+        return None
 
 
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
