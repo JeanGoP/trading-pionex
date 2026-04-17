@@ -193,19 +193,17 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         vol_current = df["volume"].iloc[-1]
         vol_ratio = vol_current / vol_avg if vol_avg > 0 else 0
 
-        if rsi < rsi_min or rsi > rsi_max:
-            return None
-
+      
         score = 0
-        if rsi_min + 5 <= rsi <= rsi_max - 5:
+        if rsi_min <= rsi <= rsi_max:
             score += 30
-        if 2.0 <= bb_width <= 6.0:
+        if bb_width > 0:
             score += 25
-        if abs(macd_line - signal_line) < 0.001 * pair_info["price"]:
+        if macd_line is not None:
             score += 20
-        if 0.8 <= vol_ratio <= 1.5:
+        if vol_ratio > 0:
             score += 15
-        if pair_info["volume"] > float(config.get("min_volume_24h", 5000000)) * 3:
+        if pair_info["volume"] > float(config.get("min_volume_24h", 500000)):
             score += 10
 
         return {
