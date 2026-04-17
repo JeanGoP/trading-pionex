@@ -2,7 +2,7 @@ fastapi==0.111.0
 uvicorn==0.30.1
 websockets==12.0
 requests==2.31.0
-pandas==2.2.2
+pandas==2.1.4
 numpy==1.26.4
 ta==0.11.0
 schedule==1.2.1
