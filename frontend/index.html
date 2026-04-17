@@ -7,211 +7,41 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     :root {
-      --bg: #0f1117;
-      --bg2: #1a1d27;
-      --bg3: #22263a;
-      --accent: #00d4aa;
-      --accent2: #0088ff;
-      --danger: #ff4757;
-      --warning: #ffa502;
-      --success: #2ed573;
-      --text: #e8eaf0;
-      --text2: #8b8fa8;
-      --border: #2a2d3e;
+      --bg: #0f1117; --bg2: #1a1d27; --bg3: #22263a;
+      --accent: #00d4aa; --accent2: #0088ff;
+      --danger: #ff4757; --warning: #ffa502; --success: #2ed573;
+      --text: #e8eaf0; --text2: #8b8fa8; --border: #2a2d3e;
     }
-
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-
-    header {
-      background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      padding: 0 2rem;
-      height: 64px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .logo-icon {
-      width: 36px;
-      height: 36px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 13px;
-      font-weight: 500;
-      background: var(--bg3);
-      border: 1px solid var(--border);
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--danger);
-    }
-
-    .status-dot.active {
-      background: var(--success);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    .mode-badge {
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      background: rgba(255, 165, 2, 0.15);
-      color: var(--warning);
-      border: 1px solid rgba(255, 165, 2, 0.3);
-    }
-
-    .mode-badge.real {
-      background: rgba(46, 213, 115, 0.15);
-      color: var(--success);
-      border-color: rgba(46, 213, 115, 0.3);
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
-
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .metric-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .metric-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: var(--accent);
-    }
-
+    body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 2rem; height: 64px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .logo { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
+    .logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .status-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; background: var(--bg3); border: 1px solid var(--border); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+    .status-dot.active { background: var(--success); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .mode-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: rgba(255,165,2,0.15); color: var(--warning); border: 1px solid rgba(255,165,2,0.3); }
+    .mode-badge.real { background: rgba(46,213,115,0.15); color: var(--success); border-color: rgba(46,213,115,0.3); }
+    .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .metric-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; position: relative; overflow: hidden; }
+    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
     .metric-card.danger::before { background: var(--danger); }
     .metric-card.warning::before { background: var(--warning); }
     .metric-card.info::before { background: var(--accent2); }
-
-    .metric-label {
-      font-size: 12px;
-      color: var(--text2);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-
-    .metric-value {
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-
+    .metric-label { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .metric-value { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
     .metric-sub { font-size: 12px; color: var(--text2); }
-
-    .metric-icon {
-      position: absolute;
-      top: 20px; right: 20px;
-      font-size: 24px;
-      opacity: 0.3;
-    }
-
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1fr 380px;
-      gap: 20px;
-      margin-bottom: 20px;
-    }
-
-    .card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-
-    .card-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
+    .metric-icon { position: absolute; top: 20px; right: 20px; font-size: 24px; opacity: 0.3; }
+    .main-grid { display: grid; grid-template-columns: 1fr 380px; gap: 20px; margin-bottom: 20px; }
+    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
     .card-title { font-size: 14px; font-weight: 600; color: var(--text); }
     .card-body { padding: 20px; }
-
-    .controls-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .btn {
-      padding: 10px 20px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
-      transition: all 0.2s;
-      width: 100%;
-    }
-
+    .controls-panel { display: flex; flex-direction: column; gap: 12px; }
+    .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; width: 100%; }
     .btn:active { transform: scale(0.98); }
     .btn-success { background: var(--success); color: #000; }
     .btn-success:hover { background: #26c065; }
@@ -221,80 +51,22 @@
     .btn-primary:hover { background: #0077e6; }
     .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
     .btn-outline:hover { background: var(--bg3); }
-
     .config-item { margin-bottom: 12px; }
-
-    .config-label {
-      font-size: 12px;
-      color: var(--text2);
-      margin-bottom: 4px;
-      display: block;
-    }
-
-    .config-input {
-      width: 100%;
-      padding: 8px 12px;
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      font-size: 13px;
-      outline: none;
-    }
-
+    .config-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; display: block; }
+    .config-input { width: 100%; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; outline: none; }
     .config-input:focus { border-color: var(--accent); }
-
-    .toggle-wrapper {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 0;
-    }
-
+    .toggle-wrapper { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
     .toggle { position: relative; width: 44px; height: 24px; }
     .toggle input { opacity: 0; width: 0; height: 0; }
-
-    .toggle-slider {
-      position: absolute;
-      inset: 0;
-      background: var(--bg3);
-      border-radius: 12px;
-      cursor: pointer;
-      border: 1px solid var(--border);
-      transition: 0.2s;
-    }
-
-    .toggle-slider::before {
-      content: '';
-      position: absolute;
-      width: 18px; height: 18px;
-      left: 2px; top: 2px;
-      background: var(--text2);
-      border-radius: 50%;
-      transition: 0.2s;
-    }
-
+    .toggle-slider { position: absolute; inset: 0; background: var(--bg3); border-radius: 12px; cursor: pointer; border: 1px solid var(--border); transition: 0.2s; }
+    .toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; background: var(--text2); border-radius: 50%; transition: 0.2s; }
     .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
     .toggle input:checked + .toggle-slider::before { transform: translateX(20px); background: #000; }
-
-    .logs-container {
-      height: 280px;
-      overflow-y: auto;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-    }
-
+    .logs-container { height: 280px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; }
     .logs-container::-webkit-scrollbar { width: 4px; }
     .logs-container::-webkit-scrollbar-track { background: var(--bg3); }
     .logs-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    .log-item {
-      padding: 4px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
-      display: flex;
-      gap: 8px;
-    }
-
+    .log-item { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03); display: flex; gap: 8px; }
     .log-time { color: var(--text2); min-width: 70px; }
     .log-tipo { min-width: 70px; font-weight: 600; }
     .log-tipo.INFO { color: var(--accent2); }
@@ -302,138 +74,37 @@
     .log-tipo.WARNING { color: var(--warning); }
     .log-tipo.ERROR { color: var(--danger); }
     .log-msg { color: var(--text); }
-
     .table-wrapper { overflow-x: auto; }
-
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-
-    th {
-      padding: 10px 12px;
-      text-align: left;
-      color: var(--text2);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    td {
-      padding: 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.04);
-      color: var(--text);
-    }
-
+    th { padding: 10px 12px; text-align: left; color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+    td { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text); }
     tr:hover td { background: rgba(255,255,255,0.02); }
-
     .badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
     .badge-success { background: rgba(46,213,115,0.15); color: var(--success); }
     .badge-danger { background: rgba(255,71,87,0.15); color: var(--danger); }
     .badge-warning { background: rgba(255,165,2,0.15); color: var(--warning); }
     .badge-info { background: rgba(0,136,255,0.15); color: var(--accent2); }
-
     .positive { color: var(--success); }
     .negative { color: var(--danger); }
-
     .chart-wrapper { position: relative; height: 200px; }
-
-    .bottom-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-
-    @media (max-width: 1024px) {
-      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-      .main-grid { grid-template-columns: 1fr; }
-      .bottom-grid { grid-template-columns: 1fr; }
-    }
-
-    @media (max-width: 600px) {
-      .metrics-grid { grid-template-columns: 1fr 1fr; }
-      .container { padding: 1rem; }
-    }
-
-    .loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 40px;
-      color: var(--text2);
-      font-size: 13px;
-    }
-
-    .spinner {
-      width: 20px; height: 20px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-right: 10px;
-    }
-
+    .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 1024px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } .main-grid { grid-template-columns: 1fr; } .bottom-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) { .metrics-grid { grid-template-columns: 1fr 1fr; } .container { padding: 1rem; } }
+    .loading { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--text2); font-size: 13px; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    .notification {
-      position: fixed;
-      bottom: 24px; right: 24px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      z-index: 1000;
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.3s;
-    }
-
+    .notification { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
     .notification.show { transform: translateY(0); opacity: 1; }
     .notification.success { background: var(--success); color: #000; }
     .notification.error { background: var(--danger); color: #fff; }
     .notification.info { background: var(--accent2); color: #fff; }
-
     .divider { height: 1px; background: var(--border); margin: 12px 0; }
-
-    .ultimo-analisis {
-      font-size: 11px;
-      color: var(--text2);
-      text-align: center;
-      padding: 8px;
-    }
-
-    .countdown-wrapper {
-      text-align: center;
-      margin-top: 4px;
-    }
-
-    .countdown-label {
-      font-size: 11px;
-      color: var(--text2);
-      margin-bottom: 6px;
-    }
-
-    .countdown-timer {
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: 2px;
-      font-family: 'Courier New', monospace;
-    }
-
-    .progress-track {
-      height: 4px;
-      background: var(--bg3);
-      border-radius: 2px;
-      margin-top: 8px;
-      overflow: hidden;
-    }
-
-    .progress-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--accent);
-      border-radius: 2px;
-      transition: width 1s linear;
-    }
+    .ultimo-analisis { font-size: 11px; color: var(--text2); text-align: center; padding: 8px; }
+    .countdown-wrapper { text-align: center; margin-top: 4px; }
+    .countdown-label { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+    .countdown-timer { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: 2px; font-family: 'Courier New', monospace; }
+    .progress-track { height: 4px; background: var(--bg3); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width 1s linear; }
   </style>
 </head>
 <body>
@@ -453,7 +124,6 @@
 </header>
 
 <div class="container">
-
   <div class="metrics-grid">
     <div class="metric-card">
       <div class="metric-icon">🤖</div>
@@ -482,9 +152,7 @@
   </div>
 
   <div class="main-grid">
-
     <div style="display:flex;flex-direction:column;gap:20px;">
-
       <div class="card">
         <div class="card-header">
           <span class="card-title">Ganancias acumuladas</span>
@@ -496,7 +164,6 @@
           </div>
         </div>
       </div>
-
       <div class="card">
         <div class="card-header">
           <span class="card-title">Logs del sistema</span>
@@ -504,35 +171,23 @@
         </div>
         <div class="card-body" style="padding:12px">
           <div class="logs-container" id="logs-container">
-            <div class="loading">
-              <div class="spinner"></div>
-              Conectando al sistema...
-            </div>
+            <div class="loading"><div class="spinner"></div>Conectando al sistema...</div>
           </div>
         </div>
       </div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:20px;">
-
       <div class="card">
         <div class="card-header">
           <span class="card-title">Control del sistema</span>
         </div>
         <div class="card-body">
           <div class="controls-panel">
-            <button class="btn btn-success" id="btn-iniciar" onclick="iniciarSistema()">
-              ▶ Iniciar sistema
-            </button>
-            <button class="btn btn-danger" id="btn-detener" onclick="detenerSistema()" disabled>
-              ■ Detener sistema
-            </button>
-            <button class="btn btn-primary" onclick="cicloManual()">
-              🔍 Análisis manual
-            </button>
-
+            <button class="btn btn-success" id="btn-iniciar" onclick="iniciarSistema()">▶ Iniciar sistema</button>
+            <button class="btn btn-danger" id="btn-detener" onclick="detenerSistema()" disabled>■ Detener sistema</button>
+            <button class="btn btn-primary" onclick="cicloManual()">🔍 Análisis manual</button>
             <div class="divider"></div>
-
             <div class="toggle-wrapper">
               <span style="font-size:13px">Modo prueba</span>
               <label class="toggle">
@@ -540,11 +195,7 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
-
-            <div class="ultimo-analisis" id="ultimo-analisis">
-              Último análisis: --
-            </div>
-
+            <div class="ultimo-analisis" id="ultimo-analisis">Último análisis: --</div>
             <div class="countdown-wrapper">
               <div class="countdown-label">Próximo análisis en</div>
               <div class="countdown-timer" id="countdown">--:--</div>
@@ -552,7 +203,6 @@
                 <div class="progress-fill" id="progress-bar"></div>
               </div>
             </div>
-
           </div>
         </div>
       </div>
@@ -597,7 +247,6 @@
   </div>
 
   <div class="bottom-grid">
-
     <div class="card">
       <div class="card-header">
         <span class="card-title">Historial de bots</span>
@@ -607,14 +256,7 @@
         <div class="table-wrapper">
           <table>
             <thead>
-              <tr>
-                <th>Par</th>
-                <th>Entrada</th>
-                <th>Score</th>
-                <th>RSI</th>
-                <th>Estado</th>
-                <th>Ganancia</th>
-              </tr>
+              <tr><th>Par</th><th>Entrada</th><th>Score</th><th>RSI</th><th>Estado</th><th>Ganancia</th></tr>
             </thead>
             <tbody id="bots-table">
               <tr><td colspan="6" class="loading">Sin datos aún</td></tr>
@@ -623,7 +265,6 @@
         </div>
       </div>
     </div>
-
     <div class="card">
       <div class="card-header">
         <span class="card-title">Historial de ganancias</span>
@@ -633,13 +274,7 @@
         <div class="table-wrapper">
           <table>
             <thead>
-              <tr>
-                <th>Par</th>
-                <th>Ganancia</th>
-                <th>%</th>
-                <th>Modo</th>
-                <th>Fecha</th>
-              </tr>
+              <tr><th>Par</th><th>Ganancia</th><th>%</th><th>Modo</th><th>Fecha</th></tr>
             </thead>
             <tbody id="ganancias-table">
               <tr><td colspan="5" class="loading">Sin datos aún</td></tr>
@@ -661,23 +296,19 @@
   let proximoAnalisis = null;
   let countdownInterval = null;
   const INTERVALO_MS = 30 * 60 * 1000;
-  const LS_KEY = 'pionex_ultimo_analisis_ts';
 
   // ============================================================
-  // CUENTA REGRESIVA — persiste al refrescar con localStorage
+  // CUENTA REGRESIVA — sincronizada con fecha real del servidor
   // ============================================================
-  function registrarAnalisis() {
-    localStorage.setItem(LS_KEY, Date.now().toString());
-  }
-
-  function iniciarCuentaRegresiva() {
+  function iniciarCuentaRegresiva(ultimoAnalisisStr) {
     if (countdownInterval) clearInterval(countdownInterval);
 
     const ahora = Date.now();
-    const guardado = localStorage.getItem(LS_KEY);
 
-    if (guardado) {
-      const transcurrido = ahora - parseInt(guardado);
+    if (ultimoAnalisisStr) {
+      // Convertir "2026-04-17 20:42:10" a timestamp
+      const fechaServidor = new Date(ultimoAnalisisStr.replace(' ', 'T')).getTime();
+      const transcurrido = ahora - fechaServidor;
       const restante = INTERVALO_MS - transcurrido;
       proximoAnalisis = restante > 0
         ? new Date(ahora + restante)
@@ -688,17 +319,13 @@
 
     countdownInterval = setInterval(() => {
       const diff = proximoAnalisis - Date.now();
-
       if (diff <= 0) {
-        registrarAnalisis();
         proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
         return;
       }
-
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       const pct = ((INTERVALO_MS - diff) / INTERVALO_MS) * 100;
-
       document.getElementById('countdown').textContent =
         `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       document.getElementById('progress-bar').style.width = pct + '%';
@@ -732,6 +359,7 @@
         if (msg.data.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.data.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.data.ultimo_analisis;
+          iniciarCuentaRegresiva(msg.data.ultimo_analisis);
         }
       }
 
@@ -741,8 +369,7 @@
         if (msg.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.ultimo_analisis;
-          registrarAnalisis();
-          iniciarCuentaRegresiva();
+          iniciarCuentaRegresiva(msg.ultimo_analisis);
         }
       }
     };
@@ -769,10 +396,7 @@
     document.getElementById('m-stoploss').textContent = stats.bots_stop_loss || 0;
 
     if (stats.ganancia_total > 0) {
-      gananciaData.push({
-        x: new Date().toLocaleTimeString(),
-        y: parseFloat((stats.ganancia_total || 0).toFixed(4))
-      });
+      gananciaData.push({ x: new Date().toLocaleTimeString(), y: parseFloat((stats.ganancia_total || 0).toFixed(4)) });
       if (gananciaData.length > 20) gananciaData.shift();
       actualizarChart();
     }
@@ -789,9 +413,7 @@
     if (config.stop_loss_pct) document.getElementById('cfg-sl').value = config.stop_loss_pct;
     if (config.grid_count) document.getElementById('cfg-grids').value = config.grid_count;
     if (config.max_active_bots) document.getElementById('cfg-maxbots').value = config.max_active_bots;
-    if (config.modo_prueba) {
-      document.getElementById('toggle-prueba').checked = config.modo_prueba === 'true';
-    }
+    if (config.modo_prueba) document.getElementById('toggle-prueba').checked = config.modo_prueba === 'true';
   }
 
   function actualizarEstado(activo, modoPrueba) {
@@ -806,7 +428,6 @@
       text.textContent = 'Activo';
       btnIniciar.disabled = true;
       btnDetener.disabled = false;
-      iniciarCuentaRegresiva();
     } else {
       dot.classList.remove('active');
       text.textContent = 'Inactivo';
@@ -839,9 +460,7 @@
     while (container.children.length > 100) container.removeChild(container.lastChild);
   }
 
-  function clearLogs() {
-    document.getElementById('logs-container').innerHTML = '';
-  }
+  function clearLogs() { document.getElementById('logs-container').innerHTML = ''; }
 
   // ============================================================
   // CHART
@@ -850,23 +469,9 @@
     const ctx = document.getElementById('ganancia-chart').getContext('2d');
     gananciaChart = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'Ganancia USDT',
-          data: [],
-          borderColor: '#00d4aa',
-          backgroundColor: 'rgba(0,212,170,0.08)',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointBackgroundColor: '#00d4aa',
-          fill: true,
-          tension: 0.4
-        }]
-      },
+      data: { labels: [], datasets: [{ label: 'Ganancia USDT', data: [], borderColor: '#00d4aa', backgroundColor: 'rgba(0,212,170,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#00d4aa', fill: true, tension: 0.4 }] },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
+        responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { color: '#8b8fa8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
@@ -892,23 +497,16 @@
       const bots = await res.json();
       const tbody = document.getElementById('bots-table');
       document.getElementById('bots-count').textContent = bots.length + ' bots';
-
-      if (bots.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">Sin bots aún</td></tr>';
-        return;
-      }
-
+      if (bots.length === 0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">Sin bots aún</td></tr>'; return; }
       tbody.innerHTML = bots.map(b => `
         <tr>
-          <td><strong>${b.symbol.replace('_USDT', '')}</strong><br>
-          <span style="font-size:10px;color:var(--text2)">${b.modo_prueba ? '🧪' : '💰'}</span></td>
+          <td><strong>${b.symbol.replace('_USDT', '')}</strong><br><span style="font-size:10px;color:var(--text2)">${b.modo_prueba ? '🧪' : '💰'}</span></td>
           <td>$${b.precio_entrada.toFixed(4)}</td>
           <td><span class="badge badge-info">${b.score}</span></td>
           <td>${b.rsi}</td>
           <td><span class="badge ${b.estado === 'ACTIVO' ? 'badge-success' : b.estado === 'STOP_LOSS' ? 'badge-danger' : 'badge-warning'}">${b.estado}</span></td>
           <td class="${b.ganancia >= 0 ? 'positive' : 'negative'}">$${b.ganancia.toFixed(4)}</td>
-        </tr>
-      `).join('');
+        </tr>`).join('');
     } catch (e) { console.error('Error cargando bots:', e); }
   }
 
@@ -918,12 +516,7 @@
       const ganancias = await res.json();
       const tbody = document.getElementById('ganancias-table');
       document.getElementById('ganancias-count').textContent = ganancias.length + ' operaciones';
-
-      if (ganancias.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">Sin operaciones aún</td></tr>';
-        return;
-      }
-
+      if (ganancias.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">Sin operaciones aún</td></tr>'; return; }
       tbody.innerHTML = ganancias.map(g => `
         <tr>
           <td><strong>${g.symbol.replace('_USDT', '')}</strong></td>
@@ -931,8 +524,7 @@
           <td class="${g.ganancia_pct >= 0 ? 'positive' : 'negative'}">${g.ganancia_pct.toFixed(2)}%</td>
           <td><span class="badge ${g.modo_prueba ? 'badge-warning' : 'badge-success'}">${g.modo_prueba ? 'PRUEBA' : 'REAL'}</span></td>
           <td style="font-size:11px;color:var(--text2)">${g.fecha ? g.fecha.substring(11,19) : '--'}</td>
-        </tr>
-      `).join('');
+        </tr>`).join('');
     } catch (e) { console.error('Error cargando ganancias:', e); }
   }
 
@@ -941,63 +533,37 @@
   // ============================================================
   async function iniciarSistema() {
     try {
-      await fetch(`${API}/api/sistema`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'iniciar' })
-      });
+      await fetch(`${API}/api/sistema`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'iniciar' }) });
       actualizarEstado(true, document.getElementById('toggle-prueba').checked);
       showNotification('Sistema iniciado correctamente', 'success');
-    } catch (e) {
-      showNotification('Error iniciando el sistema', 'error');
-    }
+    } catch (e) { showNotification('Error iniciando el sistema', 'error'); }
   }
 
   async function detenerSistema() {
     try {
-      await fetch(`${API}/api/sistema`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'detener' })
-      });
+      await fetch(`${API}/api/sistema`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'detener' }) });
       actualizarEstado(false, document.getElementById('toggle-prueba').checked);
       showNotification('Sistema detenido', 'info');
-    } catch (e) {
-      showNotification('Error deteniendo el sistema', 'error');
-    }
+    } catch (e) { showNotification('Error deteniendo el sistema', 'error'); }
   }
 
   async function cicloManual() {
     try {
-      await fetch(`${API}/api/sistema`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'ciclo_manual' })
-      });
+      await fetch(`${API}/api/sistema`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'ciclo_manual' }) });
       showNotification('Análisis manual iniciado', 'info');
-      registrarAnalisis();
-      iniciarCuentaRegresiva();
-    } catch (e) {
-      showNotification('Error iniciando análisis', 'error');
-    }
+      iniciarCuentaRegresiva(new Date().toISOString().replace('T', ' ').substring(0, 19));
+    } catch (e) { showNotification('Error iniciando análisis', 'error'); }
   }
 
   async function toggleModo() {
     const esPrueba = document.getElementById('toggle-prueba').checked;
     try {
-      await fetch(`${API}/api/configuracion`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clave: 'modo_prueba', valor: esPrueba ? 'true' : 'false' })
-      });
+      await fetch(`${API}/api/configuracion`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clave: 'modo_prueba', valor: esPrueba ? 'true' : 'false' }) });
       const badge = document.getElementById('mode-badge');
       badge.textContent = esPrueba ? 'PRUEBA' : 'REAL';
-      if (esPrueba) badge.classList.remove('real');
-      else badge.classList.add('real');
+      if (esPrueba) badge.classList.remove('real'); else badge.classList.add('real');
       showNotification(`Modo ${esPrueba ? 'PRUEBA' : 'REAL'} activado`, 'info');
-    } catch (e) {
-      showNotification('Error cambiando modo', 'error');
-    }
+    } catch (e) { showNotification('Error cambiando modo', 'error'); }
   }
 
   async function guardarConfig() {
@@ -1010,20 +576,11 @@
       max_active_bots: document.getElementById('cfg-maxbots').value
     };
     try {
-      await fetch(`${API}/api/configuracion/batch`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
-      });
+      await fetch(`${API}/api/configuracion/batch`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
       showNotification('Configuración guardada', 'success');
-    } catch (e) {
-      showNotification('Error guardando configuración', 'error');
-    }
+    } catch (e) { showNotification('Error guardando configuración', 'error'); }
   }
 
-  // ============================================================
-  // NOTIFICACIONES
-  // ============================================================
   function showNotification(msg, type = 'info') {
     const el = document.getElementById('notification');
     el.textContent = msg;
