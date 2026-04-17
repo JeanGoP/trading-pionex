@@ -12,7 +12,26 @@ from database import (
     SessionLocal, guardar_bot, cerrar_bot,
     guardar_ciclo, get_configuracion, get_estadisticas
 )
+import os
 
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
+
+def notify(message: str):
+    """Función simplificada para enviar a Telegram"""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+        add_log("Telegram no configurado", "WARNING")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={
+            "chat_id": TELEGRAM_CHAT,
+            "text": message,
+            "parse_mode": "HTML"
+        }, timeout=10)
+        add_log("Telegram enviado OK", "SUCCESS")
+    except Exception as e:
+        add_log(f"Error Telegram: {e}", "ERROR")
 PIONEX_BASE_URL = "https://api.pionex.com"
 
 # Estado global del sistema
@@ -296,6 +315,16 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
 
         sistema_estado["bots_activos"][bot_id] = bot_data
         add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Rango: ${lower}-${upper}", "SUCCESS")
+    
+        notify(
+            f"🧪 <b>[PRUEBA] Bot simulado</b>\n\n"
+            f"📊 Par: <b>{symbol}</b>\n"
+            f"💵 Precio: <b>${price}</b>\n"
+            f"📈 Rango: <b>${lower} — ${upper}</b>\n"
+            f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
+            f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
+            f"⚠️ Simulación - no es dinero real"
+        )
         return bot_id
 
     else:
