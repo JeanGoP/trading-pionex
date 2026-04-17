@@ -661,30 +661,54 @@
   let proximoAnalisis = null;
   let countdownInterval = null;
   const INTERVALO_MS = 30 * 60 * 1000;
+  const LS_KEY = 'pionex_ultimo_analisis_ts';
 
   // ============================================================
-  // CUENTA REGRESIVA
+  // CUENTA REGRESIVA — persiste al refrescar con localStorage
   // ============================================================
+  function registrarAnalisis() {
+    localStorage.setItem(LS_KEY, Date.now().toString());
+  }
+
   function iniciarCuentaRegresiva() {
-    proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
     if (countdownInterval) clearInterval(countdownInterval);
 
+    const ahora = Date.now();
+    const guardado = localStorage.getItem(LS_KEY);
+
+    if (guardado) {
+      const transcurrido = ahora - parseInt(guardado);
+      const restante = INTERVALO_MS - transcurrido;
+      proximoAnalisis = restante > 0
+        ? new Date(ahora + restante)
+        : new Date(ahora + INTERVALO_MS);
+    } else {
+      proximoAnalisis = new Date(ahora + INTERVALO_MS);
+    }
+
     countdownInterval = setInterval(() => {
-      const diff = proximoAnalisis - new Date();
+      const diff = proximoAnalisis - Date.now();
 
       if (diff <= 0) {
+        registrarAnalisis();
         proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
         return;
       }
 
-      const minutos = Math.floor(diff / 60000);
-      const segundos = Math.floor((diff % 60000) / 1000);
-      const progreso = ((INTERVALO_MS - diff) / INTERVALO_MS) * 100;
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      const pct = ((INTERVALO_MS - diff) / INTERVALO_MS) * 100;
 
       document.getElementById('countdown').textContent =
-        `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
-      document.getElementById('progress-bar').style.width = progreso + '%';
+        `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      document.getElementById('progress-bar').style.width = pct + '%';
     }, 1000);
+  }
+
+  function detenerCuentaRegresiva() {
+    if (countdownInterval) clearInterval(countdownInterval);
+    document.getElementById('countdown').textContent = '--:--';
+    document.getElementById('progress-bar').style.width = '0%';
   }
 
   // ============================================================
@@ -708,7 +732,6 @@
         if (msg.data.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.data.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.data.ultimo_analisis;
-          iniciarCuentaRegresiva();
         }
       }
 
@@ -718,6 +741,7 @@
         if (msg.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.ultimo_analisis;
+          registrarAnalisis();
           iniciarCuentaRegresiva();
         }
       }
@@ -788,9 +812,7 @@
       text.textContent = 'Inactivo';
       btnIniciar.disabled = false;
       btnDetener.disabled = true;
-      if (countdownInterval) clearInterval(countdownInterval);
-      document.getElementById('countdown').textContent = '--:--';
-      document.getElementById('progress-bar').style.width = '0%';
+      detenerCuentaRegresiva();
     }
 
     badge.textContent = modoPrueba ? 'PRUEBA' : 'REAL';
@@ -953,6 +975,7 @@
         body: JSON.stringify({ accion: 'ciclo_manual' })
       });
       showNotification('Análisis manual iniciado', 'info');
+      registrarAnalisis();
       iniciarCuentaRegresiva();
     } catch (e) {
       showNotification('Error iniciando análisis', 'error');
