@@ -229,7 +229,32 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
 
         add_log(f"{symbol}: RSI={round(rsi,1)} BB={round(bb_width,1)}% vol_ratio={round(vol_ratio,2)}", "INFO")
 
-        score = 100
+        score = 0
+
+        # RSI neutral es mejor para grilla neutral (entre 40-60 es ideal)
+        if 40 <= rsi <= 60:
+            score += 40
+        elif 30 <= rsi <= 70:
+            score += 20
+
+        # Bollinger Bands ancho medio = buena volatilidad para grilla
+        if 2.0 <= bb_width <= 8.0:
+            score += 30
+        elif 1.0 <= bb_width <= 12.0:
+            score += 15
+
+        # Volumen estable
+        if 0.7 <= vol_ratio <= 1.5:
+            score += 20
+
+        # Volumen alto = más liquidez
+        if pair_info["volume"] > 1_000_000:
+            score += 10
+
+        # Solo retorna si tiene score mínimo de 30
+        if score < 30:
+            return None
+
         return {
             **pair_info,
             "rsi": round(rsi, 2),
