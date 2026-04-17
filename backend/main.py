@@ -377,3 +377,22 @@ async def get_stats():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+# ============================================================
+# CERRAR TODOS LOS BOTS ACTIVOS SIMULADOS
+# ============================================================
+
+@app.post("/api/bots/limpiar")
+async def limpiar_bots_simulados():
+    db = SessionLocal()
+    bots = db.query(Bot).filter(Bot.estado == "ACTIVO", Bot.modo_prueba == True).all()
+    for bot in bots:
+        bot.estado = "CERRADO"
+        bot.fecha_cierre = datetime.now()
+    db.commit()
+    db.close()
+    sistema_estado["bots_activos"] = {}
+    sistema_estado["pares_activos"] = set()
+    add_log("Bots simulados limpiados", "SUCCESS")
+    return {"mensaje": f"Se cerraron {len(bots)} bots simulados"}
