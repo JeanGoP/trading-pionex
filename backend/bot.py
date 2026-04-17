@@ -6,13 +6,15 @@ import hmac
 import hashlib
 import asyncio
 import os
-from datetime import datetime
-from ta.momentum import RSIIndicator, StochasticOscillator
+from datetime import datetime, timedelta
+from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from database import (
     SessionLocal, guardar_bot, cerrar_bot,
-    guardar_ciclo, get_configuracion, get_estadisticas
+    guardar_ciclo, get_configuracion, get_estadisticas,
+    guardar_seguimiento, get_seguimientos_pendientes,
+    actualizar_seguimiento, get_reporte_seguimiento
 )
 
 PIONEX_BASE_URL = "https://api.pionex.com"
@@ -27,6 +29,7 @@ sistema_estado = {
     "bots_activos": {},
     "pares_activos": set(),
     "ultimo_analisis": None,
+    "ultimo_reporte": None,
     "logs": [],
     "websocket_clients": set()
 }
@@ -120,6 +123,16 @@ def pionex_request(api_key: str, secret: str, method: str, endpoint: str, params
         return None
 
 
+def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
+    response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
+    if response and response.get("result"):
+        tickers = response.get("data", {}).get("tickers", [])
+        for t in tickers:
+            if t.get("symbol") == symbol:
+                return float(t.get("close", 0))
+    return 0.0
+
+
 # ============================================================
 # MODULO 1 - SCANNER
 # ============================================================
@@ -142,7 +155,6 @@ def scan_pairs(api_key: str, secret: str, config: dict):
     for ticker in usdt_pairs:
         try:
             symbol = ticker.get("symbol", "")
-
             if symbol in sistema_estado["pares_activos"]:
                 continue
 
@@ -183,19 +195,14 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100
         return None
 
     klines = response.get("data", {}).get("klines", [])
-
     if not klines or len(klines) < 20:
         return None
 
     try:
         df = pd.DataFrame(klines)
         df = df.rename(columns={
-            "time": "timestamp",
-            "open": "open",
-            "close": "close",
-            "high": "high",
-            "low": "low",
-            "volume": "volume"
+            "time": "timestamp", "open": "open", "close": "close",
+            "high": "high", "low": "low", "volume": "volume"
         })
         df[["open", "high", "low", "close", "volume"]] = df[
             ["open", "high", "low", "close", "volume"]
@@ -207,26 +214,17 @@ def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100
 
 
 def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
-    """
-    Estrategia profesional de TRIPLE CONFLUENCIA:
-    Solo entra cuando RSI + MACD + Bollinger Bands coinciden.
-    Máximo 100 puntos. Mínimo 70 para entrar.
-    """
     symbol = pair_info["symbol"]
-
     df = get_klines(api_key, secret, symbol)
     if df is None or len(df) < 50:
         return None
 
     try:
-        # ── INDICADORES ──────────────────────────────────────
-        # RSI
         rsi_series = RSIIndicator(close=df["close"], window=14).rsi()
         rsi = rsi_series.iloc[-1]
         rsi_prev = rsi_series.iloc[-2]
         rsi_subiendo = rsi > rsi_prev
 
-        # MACD
         macd_obj = MACD(close=df["close"])
         macd_line = macd_obj.macd().iloc[-1]
         signal_line = macd_obj.macd_signal().iloc[-1]
@@ -235,7 +233,6 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         macd_positivo = macd_hist > 0
         macd_creciendo = macd_hist > macd_hist_prev
 
-        # Bollinger Bands
         bb = BollingerBands(close=df["close"], window=20)
         bb_high = bb.bollinger_hband().iloc[-1]
         bb_low = bb.bollinger_lband().iloc[-1]
@@ -244,30 +241,25 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         precio_actual = df["close"].iloc[-1]
         distancia_media = abs(precio_actual - bb_mid) / bb_mid * 100
 
-        # EMA 50 y 200 — contexto de tendencia
         ema50 = EMAIndicator(close=df["close"], window=50).ema_indicator().iloc[-1]
         ema20 = EMAIndicator(close=df["close"], window=20).ema_indicator().iloc[-1]
         precio_sobre_ema20 = precio_actual > ema20
         precio_sobre_ema50 = precio_actual > ema50
 
-        # ATR — volatilidad real
         atr = AverageTrueRange(
             high=df["high"], low=df["low"], close=df["close"], window=14
         ).average_true_range().iloc[-1]
         atr_pct = (atr / precio_actual) * 100
 
-        # Volumen
         vol_avg = df["volume"].tail(20).mean()
         vol_current = df["volume"].iloc[-1]
         vol_ratio = vol_current / vol_avg if vol_avg > 0 else 0
         vol_ultimas3 = df["volume"].tail(3).mean()
         vol_creciente = vol_ultimas3 > vol_avg
 
-        # ── SISTEMA DE PUNTUACION PROFESIONAL ────────────────
         score = 0
         razones = []
 
-        # 1. RSI (25 puntos)
         if 40 <= rsi <= 55:
             score += 25
             razones.append(f"RSI óptimo ({round(rsi,1)})")
@@ -277,60 +269,50 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         elif 30 <= rsi <= 65:
             score += 5
 
-        # 2. RSI subiendo = momentum positivo (15 puntos)
         if rsi_subiendo and rsi < 60:
             score += 15
             razones.append("RSI en alza")
 
-        # 3. MACD confluencia (20 puntos)
         if macd_positivo and macd_creciendo:
             score += 20
             razones.append("MACD positivo y creciendo")
         elif macd_positivo or macd_creciendo:
             score += 10
 
-        # 4. Bollinger Bands — zona ideal (20 puntos)
         if 2.0 <= bb_width <= 6.0 and distancia_media < 1.5:
             score += 20
             razones.append(f"BB ideal ({round(bb_width,1)}%)")
         elif 1.5 <= bb_width <= 8.0:
             score += 10
 
-        # 5. Volumen creciente (10 puntos)
         if vol_creciente and vol_ratio > 1.0:
             score += 10
             razones.append("Volumen creciente")
 
-        # 6. Contexto de tendencia — EMAs (10 puntos)
         if precio_sobre_ema20 and precio_sobre_ema50:
             score += 10
             razones.append("Precio sobre EMAs")
         elif precio_sobre_ema20:
             score += 5
 
-        # ── FILTROS DE DESCALIFICACION ────────────────────────
-        # ATR muy alto = demasiado riesgo para grilla
         if atr_pct > 8.0:
             add_log(f"{symbol}: ATR muy alto ({round(atr_pct,1)}%) - descartado", "WARNING")
             return None
 
-        # RSI extremo = mercado sobrecomprado/sobrevendido
         if rsi > 75 or rsi < 25:
             add_log(f"{symbol}: RSI extremo ({round(rsi,1)}) - descartado", "WARNING")
             return None
 
-        # BB demasiado estrecho = sin movimiento
         if bb_width < 1.0:
             add_log(f"{symbol}: BB muy estrecho ({round(bb_width,1)}%) - descartado", "WARNING")
             return None
 
         add_log(
-            f"{symbol}: Score={score} | RSI={round(rsi,1)} | MACD={'✓' if macd_positivo else '✗'} | "
-            f"BB={round(bb_width,1)}% | ATR={round(atr_pct,1)}%",
+            f"{symbol}: Score={score} | RSI={round(rsi,1)} | "
+            f"MACD={'✓' if macd_positivo else '✗'} | BB={round(bb_width,1)}%",
             "INFO"
         )
 
-        # Solo entra con score mínimo de 70
         if score < 70:
             return None
 
@@ -377,7 +359,7 @@ def select_best_pairs(api_key: str, secret: str, candidates: list, config: dict)
     for p in best:
         add_log(
             f"✅ Par seleccionado: {p['symbol']} | Score: {p['score']} | "
-            f"RSI: {p['rsi']} | Razones: {p.get('razones', '')}",
+            f"RSI: {p['rsi']} | {p.get('razones', '')}",
             "SUCCESS"
         )
 
@@ -428,6 +410,22 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
 
         db = SessionLocal()
         guardar_bot(db, bot_data)
+
+        # MODULO 6: Registrar en seguimiento
+        guardar_seguimiento(db, {
+            "bot_id": bot_id,
+            "symbol": symbol,
+            "precio_entrada": price,
+            "lower_price": lower,
+            "upper_price": upper,
+            "score": pair_info.get("score", 0),
+            "rsi": pair_info.get("rsi", 0),
+            "bb_width": pair_info.get("bb_width", 0),
+            "precio_actual": price,
+            "max_precio": price,
+            "min_precio": price,
+            "resultado": "PENDIENTE"
+        })
         db.close()
 
         sistema_estado["bots_activos"][bot_id] = bot_data
@@ -438,7 +436,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         notify(
             f"🧪 <b>[PRUEBA] Bot simulado — Estrategia Pro</b>\n\n"
             f"📊 Par: <b>{symbol}</b>\n"
-            f"💵 Precio: <b>${price}</b>\n"
+            f"💵 Precio entrada: <b>${price}</b>\n"
             f"📈 Rango: <b>${lower} — ${upper}</b>\n"
             f"🔢 Grillas: <b>{grid_count}</b>\n"
             f"⚡ Apalancamiento: <b>{leverage}x</b>\n"
@@ -449,6 +447,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n"
             f"⚡ ATR: <b>{pair_info.get('atr_pct', 0)}%</b>\n"
             f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>\n\n"
+            f"👁 Seguimiento automático activado\n"
             f"⚠️ <i>Simulación - no es dinero real</i>"
         )
         return bot_id
@@ -546,6 +545,140 @@ def monitor_bots(api_key: str, secret: str, config: dict):
 
 
 # ============================================================
+# MODULO 6 - SEGUIMIENTO AUTOMATICO
+# ============================================================
+def seguimiento_automatico(api_key: str, secret: str):
+    """
+    Cada 4 horas verifica el precio actual de cada bot simulado pendiente.
+    Determina si hubiera ganado el 1% o activado el stop loss.
+    """
+    add_log("Ejecutando seguimiento automático...", "INFO")
+
+    db = SessionLocal()
+    pendientes = get_seguimientos_pendientes(db)
+    db.close()
+
+    if not pendientes:
+        add_log("Sin seguimientos pendientes", "INFO")
+        return
+
+    add_log(f"Seguimientos pendientes: {len(pendientes)}", "INFO")
+
+    for seg in pendientes:
+        try:
+            precio_actual = get_precio_actual(api_key, secret, seg.symbol)
+            if precio_actual <= 0:
+                continue
+
+            horas = int((datetime.utcnow() - seg.fecha_apertura).total_seconds() / 3600)
+            max_precio = max(seg.max_precio, precio_actual)
+            min_precio = min(seg.min_precio, precio_actual)
+            dentro_rango = seg.lower_price <= precio_actual <= seg.upper_price
+
+            # ¿Hubiera llegado al 1%?
+            ganancia_potencial = ((max_precio - seg.precio_entrada) / seg.precio_entrada * 100)
+            hubiera_ganado = ganancia_potencial >= 1.0 and dentro_rango
+
+            # ¿Hubiera activado stop loss?
+            caida = ((seg.precio_entrada - min_precio) / seg.precio_entrada * 100)
+            hubiera_stop_loss = caida >= 5.0 or precio_actual < seg.lower_price * 0.95
+
+            # Determinar resultado si pasaron más de 72 horas
+            resultado = "PENDIENTE"
+            if hubiera_ganado:
+                resultado = "GANADO"
+            elif hubiera_stop_loss:
+                resultado = "STOP_LOSS"
+            elif horas >= 72:
+                resultado = "EXPIRADO"
+
+            db = SessionLocal()
+            actualizar_seguimiento(db, seg.id, {
+                "precio_actual": precio_actual,
+                "max_precio": max_precio,
+                "min_precio": min_precio,
+                "dentro_rango": dentro_rango,
+                "hubiera_ganado": hubiera_ganado,
+                "hubiera_stop_loss": hubiera_stop_loss,
+                "horas_seguimiento": horas,
+                "resultado": resultado,
+                "fecha_resultado": datetime.utcnow() if resultado != "PENDIENTE" else None
+            })
+            db.close()
+
+            if resultado != "PENDIENTE":
+                emoji = "✅" if resultado == "GANADO" else "❌" if resultado == "STOP_LOSS" else "⏰"
+                add_log(
+                    f"Seguimiento {seg.symbol}: {resultado} | "
+                    f"Entrada: ${seg.precio_entrada} | Actual: ${precio_actual}",
+                    "SUCCESS" if resultado == "GANADO" else "WARNING"
+                )
+                notify(
+                    f"{emoji} <b>Resultado seguimiento</b>\n\n"
+                    f"📊 Par: <b>{seg.symbol}</b>\n"
+                    f"💵 Precio entrada: <b>${seg.precio_entrada}</b>\n"
+                    f"💵 Precio actual: <b>${precio_actual}</b>\n"
+                    f"📈 Máximo alcanzado: <b>${max_precio}</b>\n"
+                    f"📉 Mínimo alcanzado: <b>${min_precio}</b>\n"
+                    f"⏱ Horas seguimiento: <b>{horas}h</b>\n"
+                    f"🏆 Resultado: <b>{resultado}</b>\n"
+                    f"📊 Score original: <b>{seg.score}/100</b>"
+                )
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            add_log(f"Error en seguimiento de {seg.symbol}: {e}", "ERROR")
+
+
+# ============================================================
+# REPORTE DIARIO
+# ============================================================
+def reporte_diario():
+    """Envía un reporte completo cada 24 horas a Telegram"""
+    add_log("Generando reporte diario...", "INFO")
+
+    db = SessionLocal()
+    reporte = get_reporte_seguimiento(db)
+    stats = get_estadisticas(db)
+    db.close()
+
+    total = reporte["total_simulados"]
+    ganados = reporte["hubieran_ganado"]
+    stop_loss = reporte["hubieran_stop_loss"]
+    tasa = reporte["tasa_exito"]
+    pendientes = reporte["pendientes"]
+
+    if total == 0:
+        notify(
+            f"📊 <b>Reporte diario</b>\n\n"
+            f"Sin operaciones completadas aún.\n"
+            f"Pendientes de seguimiento: <b>{pendientes}</b>"
+        )
+        return
+
+    evaluacion = "🟢 Rentable" if tasa >= 60 else "🟡 Neutral" if tasa >= 40 else "🔴 Necesita ajustes"
+
+    notify(
+        f"📊 <b>Reporte Diario — Sistema de Trading</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 Total simulados: <b>{total}</b>\n"
+        f"✅ Hubieran ganado: <b>{ganados}</b>\n"
+        f"❌ Hubieran Stop Loss: <b>{stop_loss}</b>\n"
+        f"⏳ Pendientes: <b>{pendientes}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Tasa de éxito: <b>{tasa}%</b>\n"
+        f"📈 Evaluación: <b>{evaluacion}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Ganancia real acumulada: <b>${stats['ganancia_real']}</b>\n"
+        f"🔄 Ciclos completados: <b>{stats['total_ciclos']}</b>\n\n"
+        f"{'✅ El sistema está listo para modo real.' if tasa >= 60 else '⚠️ Continuar en modo prueba.'}"
+    )
+
+    sistema_estado["ultimo_reporte"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ============================================================
 # CICLO PRINCIPAL
 # ============================================================
 def run_cycle(api_key: str, secret: str, config: dict):
@@ -595,11 +728,16 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
     notify(
         f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
         f"🎯 <b>Triple Confluencia:</b> RSI + MACD + Bollinger Bands\n"
-        f"📊 Score mínimo para entrar: <b>70/100</b>\n"
+        f"📊 Score mínimo: <b>70/100</b>\n"
+        f"👁 Seguimiento automático: <b>cada 4 horas</b>\n"
+        f"📋 Reporte diario: <b>cada 24 horas</b>\n"
         f"⚙️ Modo: <b>{'PRUEBA' if sistema_estado['modo_prueba'] else 'REAL'}</b>\n"
-        f"⏰ Análisis cada 30 minutos"
+        f"⏰ Análisis: <b>cada 30 minutos</b>"
     )
+
     ciclo_counter = 0
+    seguimiento_counter = 0
+    reporte_counter = 0
 
     while sistema_estado["activo"]:
         try:
@@ -607,10 +745,23 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             config = get_configuracion(db)
             db.close()
 
+            # Cada 30 min — análisis o monitor
             if ciclo_counter % 2 == 0:
                 run_cycle(api_key, secret, config)
             else:
                 monitor_bots(api_key, secret, config)
+
+            # Cada 4 horas — seguimiento
+            seguimiento_counter += 1
+            if seguimiento_counter >= 8:
+                seguimiento_automatico(api_key, secret)
+                seguimiento_counter = 0
+
+            # Cada 24 horas — reporte diario
+            reporte_counter += 1
+            if reporte_counter >= 48:
+                reporte_diario()
+                reporte_counter = 0
 
             db = SessionLocal()
             stats = get_estadisticas(db)

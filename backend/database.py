@@ -83,6 +83,28 @@ def get_db():
     finally:
         db.close()
 
+class Seguimiento(Base):
+    __tablename__ = "seguimiento"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bot_id = Column(String, index=True)
+    symbol = Column(String)
+    precio_entrada = Column(Float)
+    lower_price = Column(Float)
+    upper_price = Column(Float)
+    score = Column(Integer)
+    rsi = Column(Float)
+    bb_width = Column(Float)
+    precio_actual = Column(Float, default=0.0)
+    max_precio = Column(Float, default=0.0)
+    min_precio = Column(Float, default=0.0)
+    dentro_rango = Column(Boolean, default=True)
+    hubiera_ganado = Column(Boolean, default=False)
+    hubiera_stop_loss = Column(Boolean, default=False)
+    horas_seguimiento = Column(Integer, default=0)
+    resultado = Column(String, default="PENDIENTE")
+    fecha_apertura = Column(DateTime, default=datetime.utcnow)
+    fecha_resultado = Column(DateTime, nullable=True)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -188,4 +210,49 @@ def get_estadisticas(db):
         "ganancia_real": round(ganancia_real, 4),
         "ganancia_prueba": round(ganancia_prueba, 4),
         "total_ciclos": ciclos
+    }
+
+def guardar_seguimiento(db, data: dict):
+    seg = Seguimiento(**data)
+    db.add(seg)
+    db.commit()
+    db.refresh(seg)
+    return seg
+
+
+def get_seguimientos_pendientes(db):
+    return db.query(Seguimiento).filter(
+        Seguimiento.resultado == "PENDIENTE"
+    ).all()
+
+
+def actualizar_seguimiento(db, seg_id: int, data: dict):
+    seg = db.query(Seguimiento).filter(Seguimiento.id == seg_id).first()
+    if seg:
+        for k, v in data.items():
+            setattr(seg, k, v)
+        db.commit()
+    return seg
+
+
+def get_reporte_seguimiento(db):
+    segs = db.query(Seguimiento).filter(
+        Seguimiento.resultado != "PENDIENTE"
+    ).all()
+
+    total = len(segs)
+    ganados = sum(1 for s in segs if s.hubiera_ganado)
+    stop_loss = sum(1 for s in segs if s.hubiera_stop_loss)
+    pendientes = db.query(Seguimiento).filter(
+        Seguimiento.resultado == "PENDIENTE"
+    ).count()
+
+    tasa_exito = (ganados / total * 100) if total > 0 else 0
+
+    return {
+        "total_simulados": total,
+        "hubieran_ganado": ganados,
+        "hubieran_stop_loss": stop_loss,
+        "pendientes": pendientes,
+        "tasa_exito": round(tasa_exito, 1)
     }
