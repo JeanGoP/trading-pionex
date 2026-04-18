@@ -21,6 +21,29 @@ PIONEX_BASE_URL = "https://api.pionex.com"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# Pares con futuros perpetuos disponibles en Pionex
+PARES_FUTURES_VALIDOS = {
+    "BTC_USDT", "ETH_USDT", "BNB_USDT", "SOL_USDT", "XRP_USDT",
+    "ADA_USDT", "DOGE_USDT", "MATIC_USDT", "DOT_USDT", "AVAX_USDT",
+    "LINK_USDT", "UNI_USDT", "ATOM_USDT", "LTC_USDT", "ETC_USDT",
+    "BCH_USDT", "APT_USDT", "OP_USDT", "ARB_USDT", "FIL_USDT",
+    "NEAR_USDT", "INJ_USDT", "SUI_USDT", "TRX_USDT", "TON_USDT",
+    "WLD_USDT", "IMX_USDT", "SAND_USDT", "MANA_USDT", "AAVE_USDT",
+    "MKR_USDT", "SNX_USDT", "CRV_USDT", "1INCH_USDT", "ENS_USDT",
+    "RUNE_USDT", "THETA_USDT", "FTM_USDT", "ALGO_USDT", "VET_USDT",
+    "EGLD_USDT", "XTZ_USDT", "ZEC_USDT", "DASH_USDT", "CHZ_USDT",
+    "HOT_USDT", "ZIL_USDT", "ENJ_USDT", "BAT_USDT", "STORJ_USDT",
+    "AGLD_USDT", "AEVO_USDT", "AI_USDT", "API3_USDT", "APE_USDT",
+    "ALICE_USDT", "AXL_USDT", "ACE_USDT", "ACH_USDT", "AUCTION_USDT",
+    "BLUR_USDT", "COMP_USDT", "CYBER_USDT", "DYDX_USDT", "FET_USDT",
+    "GALA_USDT", "GMX_USDT", "GRT_USDT", "ICP_USDT", "JTO_USDT",
+    "JUP_USDT", "KAVA_USDT", "LDO_USDT", "LINA_USDT", "LUNA_USDT",
+    "MAGIC_USDT", "MASK_USDT", "OCEAN_USDT", "PEOPLE_USDT", "PERP_USDT",
+    "PYTH_USDT", "RDNT_USDT", "RNDR_USDT", "SEI_USDT", "SHIB_USDT",
+    "SKL_USDT", "SSV_USDT", "STMX_USDT", "STX_USDT", "SUSHI_USDT",
+    "TIA_USDT", "WAXP_USDT", "YFI_USDT", "ZRX_USDT"
+}
+
 # Estado global del sistema
 sistema_estado = {
     "activo": False,
@@ -134,6 +157,36 @@ def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
 
 
 # ============================================================
+# CARGAR PARES ACTIVOS DESDE DB AL INICIO
+# ============================================================
+def cargar_pares_activos_desde_db():
+    """Al arrancar el servidor, recupera los pares activos desde la DB
+    para evitar que se dupliquen bots al reiniciar Render."""
+    try:
+        from database import Bot
+        db = SessionLocal()
+        bots_activos = db.query(Bot).filter(
+            Bot.estado == "ACTIVO",
+            Bot.modo_prueba == True
+        ).all()
+        db.close()
+
+        for bot in bots_activos:
+            sistema_estado["pares_activos"].add(bot.symbol)
+            sistema_estado["bots_activos"][bot.bot_id] = {
+                "symbol": bot.symbol,
+                "precio_entrada": bot.precio_entrada,
+                "score": bot.score,
+                "rsi": bot.rsi,
+            }
+
+        if bots_activos:
+            add_log(f"Recuperados {len(bots_activos)} bots activos desde DB", "INFO")
+    except Exception as e:
+        add_log(f"Error cargando pares activos: {e}", "ERROR")
+
+
+# ============================================================
 # MODULO 1 - SCANNER
 # ============================================================
 def scan_pairs(api_key: str, secret: str, config: dict):
@@ -148,8 +201,10 @@ def scan_pairs(api_key: str, secret: str, config: dict):
         return []
 
     tickers = response.get("data", {}).get("tickers", [])
-    usdt_pairs = [t for t in tickers if t.get("symbol", "").endswith("_USDT")]
-    add_log(f"Total pares USDT encontrados: {len(usdt_pairs)}", "INFO")
+
+    # Solo pares con futuros perpetuos válidos en Pionex
+    usdt_pairs = [t for t in tickers if t.get("symbol", "") in PARES_FUTURES_VALIDOS]
+    add_log(f"Total pares futuros válidos encontrados: {len(usdt_pairs)}", "INFO")
 
     candidates = []
     for ticker in usdt_pairs:
@@ -411,7 +466,6 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         db = SessionLocal()
         guardar_bot(db, bot_data)
 
-        # MODULO 6: Registrar en seguimiento
         guardar_seguimiento(db, {
             "bot_id": bot_id,
             "symbol": symbol,
@@ -548,10 +602,6 @@ def monitor_bots(api_key: str, secret: str, config: dict):
 # MODULO 6 - SEGUIMIENTO AUTOMATICO
 # ============================================================
 def seguimiento_automatico(api_key: str, secret: str):
-    """
-    Cada 4 horas verifica el precio actual de cada bot simulado pendiente.
-    Determina si hubiera ganado el 1% o activado el stop loss.
-    """
     add_log("Ejecutando seguimiento automático...", "INFO")
 
     db = SessionLocal()
@@ -575,15 +625,12 @@ def seguimiento_automatico(api_key: str, secret: str):
             min_precio = min(seg.min_precio, precio_actual)
             dentro_rango = seg.lower_price <= precio_actual <= seg.upper_price
 
-            # ¿Hubiera llegado al 1%?
             ganancia_potencial = ((max_precio - seg.precio_entrada) / seg.precio_entrada * 100)
             hubiera_ganado = ganancia_potencial >= 1.0 and dentro_rango
 
-            # ¿Hubiera activado stop loss?
             caida = ((seg.precio_entrada - min_precio) / seg.precio_entrada * 100)
             hubiera_stop_loss = caida >= 5.0 or precio_actual < seg.lower_price * 0.95
 
-            # Determinar resultado si pasaron más de 72 horas
             resultado = "PENDIENTE"
             if hubiera_ganado:
                 resultado = "GANADO"
@@ -635,7 +682,6 @@ def seguimiento_automatico(api_key: str, secret: str):
 # REPORTE DIARIO
 # ============================================================
 def reporte_diario():
-    """Envía un reporte completo cada 24 horas a Telegram"""
     add_log("Generando reporte diario...", "INFO")
 
     db = SessionLocal()
@@ -725,6 +771,10 @@ def run_cycle(api_key: str, secret: str, config: dict):
 # ============================================================
 async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_chat: str):
     add_log("Sistema de trading iniciado con Estrategia Profesional", "SUCCESS")
+
+    # Cargar pares activos desde DB para evitar duplicados al reiniciar
+    cargar_pares_activos_desde_db()
+
     notify(
         f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
         f"🎯 <b>Triple Confluencia:</b> RSI + MACD + Bollinger Bands\n"
@@ -732,7 +782,8 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
         f"👁 Seguimiento automático: <b>cada 4 horas</b>\n"
         f"📋 Reporte diario: <b>cada 24 horas</b>\n"
         f"⚙️ Modo: <b>{'PRUEBA' if sistema_estado['modo_prueba'] else 'REAL'}</b>\n"
-        f"⏰ Análisis: <b>cada 30 minutos</b>"
+        f"⏰ Análisis: <b>cada 30 minutos</b>\n"
+        f"🔒 Pares con futuros válidos: <b>{len(PARES_FUTURES_VALIDOS)}</b>"
     )
 
     ciclo_counter = 0
@@ -745,19 +796,16 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             config = get_configuracion(db)
             db.close()
 
-            # Cada 30 min — análisis o monitor
             if ciclo_counter % 2 == 0:
                 run_cycle(api_key, secret, config)
             else:
                 monitor_bots(api_key, secret, config)
 
-            # Cada 4 horas — seguimiento
             seguimiento_counter += 1
             if seguimiento_counter >= 8:
                 seguimiento_automatico(api_key, secret)
                 seguimiento_counter = 0
 
-            # Cada 24 horas — reporte diario
             reporte_counter += 1
             if reporte_counter >= 48:
                 reporte_diario()
