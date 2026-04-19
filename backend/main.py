@@ -13,7 +13,7 @@ from database import (
     init_db, get_db, get_configuracion, actualizar_configuracion,
     get_estadisticas, SessionLocal, Bot, Ciclo, Ganancia
 )
-from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots
+from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status
 
 load_dotenv()
 
@@ -61,6 +61,10 @@ class ConfigUpdate(BaseModel):
 
 class SistemaAction(BaseModel):
     accion: str
+
+
+class TelegramTest(BaseModel):
+    mensaje: str = "Prueba: mensaje desde Trading Pionex API"
 
 
 # ============================================================
@@ -153,6 +157,17 @@ async def get_estado():
         "stats": stats,
         "config": config
     }
+
+
+@app.get("/api/telegram/status")
+async def telegram_status():
+    return {"telegram": get_telegram_status()}
+
+
+@app.post("/api/telegram/test")
+async def telegram_test(body: TelegramTest):
+    send_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT, body.mensaje)
+    return {"ok": True, "telegram": get_telegram_status()}
 
 
 @app.post("/api/sistema")

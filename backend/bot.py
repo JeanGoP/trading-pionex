@@ -31,6 +31,18 @@ _telegram_queue: "queue.Queue[tuple[str, str, str]]" = queue.Queue(maxsize=1000)
 _telegram_worker_started = False
 _telegram_worker_lock = threading.Lock()
 _telegram_not_configured_logged = False
+_telegram_state_lock = threading.Lock()
+_telegram_state = {
+    "worker_started": False,
+    "queue_size": 0,
+    "sent_ok": 0,
+    "sent_fail": 0,
+    "last_enqueued_utc": None,
+    "last_attempt_utc": None,
+    "last_ok_utc": None,
+    "last_fail_utc": None,
+    "last_error": None,
+}
 _news_cache: dict = {}
 _news_not_configured_logged = False
 
@@ -123,8 +135,22 @@ def send_telegram(token: str, chat_id: str, message: str):
     _ensure_telegram_worker()
     try:
         _telegram_queue.put_nowait((resolved_token, resolved_chat, message))
+        with _telegram_state_lock:
+            _telegram_state["queue_size"] = _telegram_queue.qsize()
+            _telegram_state["last_enqueued_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     except queue.Full:
         add_log("Cola de Telegram llena: mensaje descartado", "WARNING")
+        with _telegram_state_lock:
+            _telegram_state["sent_fail"] += 1
+            _telegram_state["last_fail_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            _telegram_state["last_error"] = "queue_full"
+
+
+def get_telegram_status():
+    with _telegram_state_lock:
+        data = dict(_telegram_state)
+    data["queue_size"] = _telegram_queue.qsize()
+    return data
 
 
 def _ensure_telegram_worker():
@@ -137,15 +163,23 @@ def _ensure_telegram_worker():
         t = threading.Thread(target=_telegram_worker, name="telegram-worker", daemon=True)
         t.start()
         _telegram_worker_started = True
+        with _telegram_state_lock:
+            _telegram_state["worker_started"] = True
 
 
 def _telegram_worker():
     while True:
-        token, chat_id, message = _telegram_queue.get()
         try:
-            _send_telegram_with_retries(token, chat_id, message)
-        finally:
-            _telegram_queue.task_done()
+            token, chat_id, message = _telegram_queue.get()
+            try:
+                _send_telegram_with_retries(token, chat_id, message)
+            finally:
+                _telegram_queue.task_done()
+                with _telegram_state_lock:
+                    _telegram_state["queue_size"] = _telegram_queue.qsize()
+        except Exception as e:
+            add_log(f"Telegram worker error: {e}", "ERROR")
+            time.sleep(1)
 
 
 def _send_telegram_with_retries(token: str, chat_id: str, message: str):
@@ -155,6 +189,8 @@ def _send_telegram_with_retries(token: str, chat_id: str, message: str):
     last_error = None
     for attempt in range(1, 6):
         try:
+            with _telegram_state_lock:
+                _telegram_state["last_attempt_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             r = requests.post(url, json=payload, timeout=15)
             if r.status_code == 200:
                 try:
@@ -165,6 +201,10 @@ def _send_telegram_with_retries(token: str, chat_id: str, message: str):
                     last_error = f"Telegram ok=false: {str(data)[:200]}"
                 else:
                     add_log("Telegram enviado OK", "SUCCESS")
+                    with _telegram_state_lock:
+                        _telegram_state["sent_ok"] += 1
+                        _telegram_state["last_ok_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                        _telegram_state["last_error"] = None
                     return
 
             if r.status_code == 429:
@@ -187,6 +227,10 @@ def _send_telegram_with_retries(token: str, chat_id: str, message: str):
         time.sleep(backoff + jitter)
 
     add_log(f"Telegram fallo tras reintentos: {last_error}", "ERROR")
+    with _telegram_state_lock:
+        _telegram_state["sent_fail"] += 1
+        _telegram_state["last_fail_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        _telegram_state["last_error"] = last_error
 
 
 def _cfg_bool(config: dict, key: str, default: bool) -> bool:
