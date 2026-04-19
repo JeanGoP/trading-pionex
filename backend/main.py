@@ -13,7 +13,7 @@ from database import (
     init_db, get_db, get_configuracion, actualizar_configuracion,
     get_estadisticas, SessionLocal, Bot, Ciclo, Ganancia
 )
-from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status
+from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status, detener_bot
 
 load_dotenv()
 
@@ -65,6 +65,10 @@ class SistemaAction(BaseModel):
 
 class TelegramTest(BaseModel):
     mensaje: str = "Prueba: mensaje desde Trading Pionex API"
+
+
+class BotStopRequest(BaseModel):
+    bot_id: str
 
 
 # ============================================================
@@ -300,6 +304,19 @@ async def get_bots_activos():
     bots = db.query(Bot).filter(Bot.estado == "ACTIVO").all()
     db.close()
     return {"total": len(bots), "bots": [b.symbol for b in bots]}
+
+
+@app.post("/api/bots/stop")
+async def stop_bot(body: BotStopRequest):
+    if not body.bot_id:
+        raise HTTPException(status_code=400, detail="bot_id requerido")
+
+    result = await asyncio.to_thread(detener_bot, PIONEX_API_KEY, PIONEX_SECRET, body.bot_id)
+    if not result.get("ok"):
+        err = result.get("error") or "error"
+        code = 404 if err == "not_found" else 400
+        raise HTTPException(status_code=code, detail=result)
+    return result
 
 
 # ============================================================

@@ -16,7 +16,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from database import (
-    SessionLocal, guardar_bot, cerrar_bot,
+    SessionLocal, guardar_bot, cerrar_bot, Bot,
     guardar_ciclo, get_configuracion, get_estadisticas,
     guardar_seguimiento, get_seguimientos_pendientes,
     actualizar_seguimiento, get_reporte_seguimiento
@@ -576,6 +576,88 @@ def get_precios_actuales(api_key: str, secret: str) -> dict:
         except Exception:
             continue
     return out
+
+
+def detener_bot(api_key: str, secret: str, bot_id: str) -> dict:
+    bot_id = str(bot_id or "").strip()
+    if not bot_id:
+        return {"ok": False, "error": "missing_bot_id"}
+
+    db = SessionLocal()
+    bot = db.query(Bot).filter(Bot.bot_id == bot_id).first()
+    if not bot:
+        db.close()
+        return {"ok": False, "error": "not_found"}
+
+    if bot.estado != "ACTIVO":
+        estado = bot.estado
+        db.close()
+        return {"ok": False, "error": "not_active", "estado": estado}
+
+    symbol = bot.symbol
+    modo_prueba = bool(bot.modo_prueba)
+
+    if modo_prueba:
+        bot.estado = "CERRADO"
+        bot.fecha_cierre = datetime.utcnow()
+        db.commit()
+        db.close()
+
+        sistema_estado["bots_activos"].pop(bot_id, None)
+        try:
+            sistema_estado["pares_activos"].discard(symbol)
+        except Exception:
+            pass
+
+        add_log(f"[PRUEBA] Bot cerrado manualmente: {symbol} | ID: {bot_id}", "WARNING")
+        notify(f"🛑 <b>[PRUEBA] Bot cerrado manualmente</b>\n\n📊 Par: <b>{symbol}</b>\n🆔 ID: <b>{bot_id}</b>")
+        return {"ok": True, "modo_prueba": True, "bot_id": bot_id, "symbol": symbol}
+
+    db.close()
+
+    endpoints = [
+        ("/api/v1/bot/terminate", {"botId": bot_id}),
+        ("/api/v1/bot/stop", {"botId": bot_id}),
+        ("/api/v1/bot/close", {"botId": bot_id}),
+        ("/api/v1/bot/terminate", {"botIdList": [bot_id]}),
+        ("/api/v1/bot/stop", {"botIdList": [bot_id]}),
+        ("/api/v1/bot/close", {"botIdList": [bot_id]}),
+    ]
+
+    last_error = None
+    last_resp = None
+    ok = False
+    used_endpoint = None
+
+    for endpoint, body in endpoints:
+        try:
+            resp = pionex_request(api_key, secret, "POST", endpoint, body=body)
+            last_resp = resp
+            if resp and resp.get("result"):
+                ok = True
+                used_endpoint = endpoint
+                break
+            last_error = str(resp)
+        except Exception as e:
+            last_error = str(e)
+
+    if not ok:
+        add_log(f"No se pudo cerrar bot {bot_id} en Pionex: {last_error}", "ERROR")
+        return {"ok": False, "error": "pionex_stop_failed", "details": last_error, "response": last_resp}
+
+    db = SessionLocal()
+    cerrar_bot(db, bot_id, ganancia=0.0, ganancia_pct=0.0, estado="CERRADO")
+    db.close()
+
+    sistema_estado["bots_activos"].pop(bot_id, None)
+    try:
+        sistema_estado["pares_activos"].discard(symbol)
+    except Exception:
+        pass
+
+    add_log(f"Bot cerrado manualmente: {symbol} | ID: {bot_id}", "WARNING")
+    notify(f"🛑 <b>Bot cerrado manualmente</b>\n\n📊 Par: <b>{symbol}</b>\n🆔 ID: <b>{bot_id}</b>")
+    return {"ok": True, "modo_prueba": False, "bot_id": bot_id, "symbol": symbol, "endpoint": used_endpoint}
 
 
 # ============================================================
