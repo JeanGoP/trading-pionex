@@ -14,3 +14,7 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: NEWS_RSS_URLS
+        sync: false
+      - key: CORS_ALLOW_ORIGINS
+        sync: false

@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, D
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+import os
 
 DATABASE_URL = "sqlite:///./trading.db"
 
@@ -125,12 +126,33 @@ def init_db():
         ("max_volatility", "8.0"),
         ("rsi_min", "35"),
         ("rsi_max", "65"),
+        ("min_score", "75"),
+        ("max_atr_pct", "7.0"),
+        ("adx_min", "15.0"),
+        ("bb_width_min", "2.0"),
+        ("bb_width_max", "6.0"),
+        ("distancia_media_max", "1.5"),
+        ("vol_ratio_min", "1.0"),
+        ("news_enabled", "true"),
+        ("news_provider", "rss"),
+        ("news_rss_urls", "https://www.coindesk.com/arc/outboundfeeds/rss/|https://cointelegraph.com/rss"),
+        ("news_lookback_hours", "12"),
+        ("news_max_items", "10"),
+        ("news_cache_minutes", "15"),
+        ("news_block_keywords", "hack,exploit,breach,bankruptcy,insolvency,investigation,sec,lawsuit,delist,delisting,suspended,halt,scam,rug,attack,vulnerability"),
+        ("news_positive_keywords", "partnership,listing,listed,integrates,adoption,upgrade,launch,mainnet,ETF,approval,record,breakout"),
     ]
 
     for clave, valor in configs_iniciales:
         existing = db.query(Configuracion).filter(Configuracion.clave == clave).first()
         if not existing:
             db.add(Configuracion(clave=clave, valor=valor))
+
+    # Migracion segura: si venia usando proveedor de pago sin token, pasa a RSS gratis.
+    provider = db.query(Configuracion).filter(Configuracion.clave == "news_provider").first()
+    if provider and str(provider.valor).strip().lower() == "cryptopanic" and not os.getenv("CRYPTOPANIC_TOKEN", "").strip():
+        provider.valor = "rss"
+        provider.fecha_actualizacion = datetime.utcnow()
 
     db.commit()
     db.close()

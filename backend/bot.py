@@ -6,9 +6,14 @@ import hmac
 import hashlib
 import asyncio
 import os
-from datetime import datetime, timedelta
+import threading
+import queue
+import random
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+import xml.etree.ElementTree as ET
 from ta.momentum import RSIIndicator
-from ta.trend import MACD, EMAIndicator
+from ta.trend import MACD, EMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from database import (
     SessionLocal, guardar_bot, cerrar_bot,
@@ -20,6 +25,14 @@ from database import (
 PIONEX_BASE_URL = "https://api.pionex.com"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
+CRYPTOPANIC_TOKEN = os.getenv("CRYPTOPANIC_TOKEN", "")
+
+_telegram_queue: "queue.Queue[tuple[str, str, str]]" = queue.Queue(maxsize=1000)
+_telegram_worker_started = False
+_telegram_worker_lock = threading.Lock()
+_telegram_not_configured_logged = False
+_news_cache: dict = {}
+_news_not_configured_logged = False
 
 # Pares con futuros perpetuos disponibles en Pionex
 PARES_FUTURES_VALIDOS = {
@@ -91,31 +104,377 @@ async def broadcast_update(data: dict):
 # TELEGRAM
 # ============================================================
 def notify(message: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        add_log("Telegram no configurado", "WARNING")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        r = requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=10)
-        if r.status_code == 200:
-            add_log("Telegram enviado OK", "SUCCESS")
-        else:
-            add_log(f"Telegram error: {r.text[:100]}", "ERROR")
-    except Exception as e:
-        add_log(f"Error Telegram: {e}", "ERROR")
+    send_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT, message)
 
 
 def send_telegram(token: str, chat_id: str, message: str):
-    notify(message)
+    global _telegram_not_configured_logged
+    resolved_token = token or TELEGRAM_TOKEN
+    resolved_chat = chat_id or TELEGRAM_CHAT
+    if not resolved_token or not resolved_chat:
+        if not _telegram_not_configured_logged:
+            add_log("Telegram no configurado", "WARNING")
+            _telegram_not_configured_logged = True
+        return
+
+    if len(message) > 3900:
+        message = message[:3900] + "..."
+
+    _ensure_telegram_worker()
+    try:
+        _telegram_queue.put_nowait((resolved_token, resolved_chat, message))
+    except queue.Full:
+        add_log("Cola de Telegram llena: mensaje descartado", "WARNING")
 
 
-# ============================================================
+def _ensure_telegram_worker():
+    global _telegram_worker_started
+    if _telegram_worker_started:
+        return
+    with _telegram_worker_lock:
+        if _telegram_worker_started:
+            return
+        t = threading.Thread(target=_telegram_worker, name="telegram-worker", daemon=True)
+        t.start()
+        _telegram_worker_started = True
+
+
+def _telegram_worker():
+    while True:
+        token, chat_id, message = _telegram_queue.get()
+        try:
+            _send_telegram_with_retries(token, chat_id, message)
+        finally:
+            _telegram_queue.task_done()
+
+
+def _send_telegram_with_retries(token: str, chat_id: str, message: str):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+
+    last_error = None
+    for attempt in range(1, 6):
+        try:
+            r = requests.post(url, json=payload, timeout=15)
+            if r.status_code == 200:
+                try:
+                    data = r.json()
+                except Exception:
+                    data = None
+                if isinstance(data, dict) and data.get("ok") is False:
+                    last_error = f"Telegram ok=false: {str(data)[:200]}"
+                else:
+                    add_log("Telegram enviado OK", "SUCCESS")
+                    return
+
+            if r.status_code == 429:
+                retry_after = 1.0
+                try:
+                    data = r.json()
+                    retry_after = float(data.get("parameters", {}).get("retry_after", retry_after))
+                except Exception:
+                    pass
+                time.sleep(min(max(retry_after, 1.0), 30.0))
+                continue
+
+            last_error = f"HTTP {r.status_code}: {r.text[:200]}"
+
+        except Exception as e:
+            last_error = str(e)
+
+        backoff = min(2 ** (attempt - 1), 30)
+        jitter = random.uniform(0, 0.5)
+        time.sleep(backoff + jitter)
+
+    add_log(f"Telegram fallo tras reintentos: {last_error}", "ERROR")
+
+
+def _cfg_bool(config: dict, key: str, default: bool) -> bool:
+    raw = str(config.get(key, str(default))).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _cfg_int(config: dict, key: str, default: int) -> int:
+    try:
+        return int(float(config.get(key, default)))
+    except Exception:
+        return default
+
+
+def _cfg_float(config: dict, key: str, default: float) -> float:
+    try:
+        return float(config.get(key, default))
+    except Exception:
+        return default
+
+
+def _cfg_csv_set(config: dict, key: str, default_csv: str) -> set:
+    raw = str(config.get(key, default_csv))
+    parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    return set(parts)
+
+
+def _cfg_split_list(config: dict, key: str, default_value: str, sep: str = "|") -> list:
+    raw = str(config.get(key, default_value))
+    return [p.strip() for p in raw.split(sep) if p.strip()]
+
+
+def _coin_from_symbol(symbol: str) -> str:
+    if not symbol:
+        return ""
+    return symbol.split("_", 1)[0].upper()
+
+
+def _parse_iso_datetime(value: str):
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def _parse_rss_datetime(value: str):
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _coin_aliases(coin: str) -> list:
+    aliases = {
+        "BTC": ["bitcoin", "btc"],
+        "ETH": ["ethereum", "eth"],
+        "BNB": ["bnb", "binance coin"],
+        "XRP": ["xrp", "ripple"],
+        "SOL": ["solana", "sol"],
+        "DOGE": ["dogecoin", "doge"],
+        "ADA": ["cardano", "ada"],
+        "DOT": ["polkadot", "dot"],
+        "AVAX": ["avalanche", "avax"],
+        "LINK": ["chainlink", "link"],
+    }
+    base = coin.lower()
+    return sorted(set([base] + aliases.get(coin.upper(), [])))
+
+
+def _fetch_rss_news(coin: str, config: dict):
+    lookback_hours = _cfg_int(config, "news_lookback_hours", 12)
+    max_items = _cfg_int(config, "news_max_items", 10)
+    env_urls = os.getenv("NEWS_RSS_URLS", "").strip()
+    default_urls = (
+        "https://www.coindesk.com/arc/outboundfeeds/rss/|"
+        "https://cointelegraph.com/rss"
+    )
+    configured_urls = _cfg_split_list(config, "news_rss_urls", env_urls or default_urls, sep="|")
+    feed_urls = configured_urls if configured_urls else [u for u in default_urls.split("|") if u]
+    aliases = _coin_aliases(coin)
+    now = datetime.utcnow()
+    headlines = []
+    seen = set()
+
+    for feed_url in feed_urls:
+        try:
+            r = requests.get(feed_url, timeout=12, headers={"User-Agent": "trading-pionex-bot/1.0"})
+            if r.status_code != 200:
+                continue
+            root = ET.fromstring(r.content)
+        except Exception:
+            continue
+
+        items = root.findall(".//item")
+        for item in items:
+            title = (item.findtext("title") or "").strip()
+            if not title:
+                continue
+
+            title_l = title.lower()
+            if coin and aliases and not any(alias in title_l for alias in aliases):
+                continue
+
+            pub = _parse_rss_datetime((item.findtext("pubDate") or "").strip())
+            if pub is not None:
+                hours_ago = (now - pub).total_seconds() / 3600
+                if hours_ago > lookback_hours:
+                    continue
+
+            if title in seen:
+                continue
+            seen.add(title)
+            headlines.append(title)
+            if len(headlines) >= max_items:
+                return {"ok": True, "headlines": headlines, "source": "rss"}
+
+    return {"ok": True, "headlines": headlines, "source": "rss"}
+
+
+def _fetch_cryptopanic(coin: str, config: dict):
+    global _news_not_configured_logged
+    token = CRYPTOPANIC_TOKEN.strip()
+    if not token:
+        if not _news_not_configured_logged:
+            add_log("Noticias habilitadas pero falta CRYPTOPANIC_TOKEN (se omite filtro de noticias)", "WARNING")
+            _news_not_configured_logged = True
+        return {"ok": False, "headlines": [], "source": "cryptopanic", "error": "missing_token"}
+
+    lookback_hours = _cfg_int(config, "news_lookback_hours", 12)
+    max_items = _cfg_int(config, "news_max_items", 10)
+    if not coin:
+        return {"ok": True, "headlines": [], "source": "cryptopanic"}
+
+    url = "https://cryptopanic.com/api/v1/posts/"
+    params = {
+        "auth_token": token,
+        "currencies": coin,
+        "kind": "news",
+        "public": "true",
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=12)
+        if r.status_code != 200:
+            return {"ok": False, "headlines": [], "source": "cryptopanic", "error": f"http_{r.status_code}"}
+        data = r.json()
+        results = data.get("results", []) if isinstance(data, dict) else []
+    except Exception as e:
+        return {"ok": False, "headlines": [], "source": "cryptopanic", "error": str(e)}
+
+    now = datetime.utcnow()
+    headlines = []
+    for item in results[: max_items * 2]:
+        title = ""
+        created_at = None
+        try:
+            title = str(item.get("title", "")).strip()
+            created_at = _parse_iso_datetime(str(item.get("created_at", "")).strip())
+        except Exception:
+            title = ""
+            created_at = None
+
+        if not title:
+            continue
+
+        if created_at is not None:
+            if created_at.tzinfo is None:
+                created_utc = created_at
+            else:
+                created_utc = created_at.astimezone(timezone.utc).replace(tzinfo=None)
+            hours_ago = (now - created_utc).total_seconds() / 3600
+            if hours_ago > lookback_hours:
+                continue
+
+        headlines.append(title)
+        if len(headlines) >= max_items:
+            break
+
+    return {"ok": True, "headlines": headlines, "source": "cryptopanic"}
+
+
+def _news_assess(symbol: str, config: dict):
+    enabled = _cfg_bool(config, "news_enabled", True)
+    if not enabled:
+        return {"enabled": False, "ok": True, "blocked": False, "score": 0, "summary": ""}
+
+    cache_minutes = _cfg_int(config, "news_cache_minutes", 15)
+    coin = _coin_from_symbol(symbol)
+    cache_key = (coin, _cfg_int(config, "news_lookback_hours", 12), _cfg_int(config, "news_max_items", 10))
+    now_ts = time.time()
+    cached = _news_cache.get(cache_key)
+    if cached and (now_ts - cached["ts"]) < cache_minutes * 60:
+        payload = cached["payload"]
+    else:
+        provider = str(config.get("news_provider", "rss")).strip().lower()
+        if provider == "cryptopanic":
+            payload = _fetch_cryptopanic(coin, config)
+        elif provider in {"rss", "free_rss"}:
+            payload = _fetch_rss_news(coin, config)
+        else:
+            payload = {"ok": False, "headlines": [], "source": provider, "error": "unsupported_provider"}
+        _news_cache[cache_key] = {"ts": now_ts, "payload": payload}
+
+    headlines = payload.get("headlines", []) if isinstance(payload, dict) else []
+    if not headlines:
+        return {"enabled": True, "ok": bool(payload.get("ok")), "blocked": False, "score": 0, "summary": ""}
+
+    block_words = _cfg_csv_set(config, "news_block_keywords", "")
+    positive_words = _cfg_csv_set(config, "news_positive_keywords", "")
+
+    blocked = False
+    score = 0
+    matched_block = set()
+    matched_positive = set()
+
+    for h in headlines:
+        text = str(h).lower()
+        for w in block_words:
+            if w and w in text:
+                matched_block.add(w)
+        for w in positive_words:
+            if w and w in text:
+                matched_positive.add(w)
+
+    if matched_block:
+        blocked = True
+        score -= 25
+    if matched_positive and not blocked:
+        score += 5
+
+    top = headlines[0][:160]
+    tags = []
+    if matched_block:
+        tags.append("riesgo:" + "/".join(sorted(list(matched_block))[:3]))
+    if matched_positive:
+        tags.append("positivo:" + "/".join(sorted(list(matched_positive))[:3]))
+
+    summary = top
+    if tags:
+        summary = f"{top} ({' | '.join(tags)})"
+
+    return {"enabled": True, "ok": bool(payload.get("ok")), "blocked": blocked, "score": score, "summary": summary}
+
+
+def _apply_news_layer(analyzed: list, config: dict) -> list:
+    enabled = _cfg_bool(config, "news_enabled", True)
+    if not enabled:
+        return analyzed
+
+    min_score = _cfg_int(config, "min_score", 75)
+    out = []
+    for item in analyzed:
+        symbol = item.get("symbol")
+        news = _news_assess(symbol, config)
+        item["news_score"] = news.get("score", 0)
+        item["news_summary"] = news.get("summary", "")
+        if news.get("summary"):
+            razones = item.get("razones", "")
+            item["razones"] = (razones + " | " if razones else "") + f"Noticias: {news.get('summary')}"
+
+        new_score = int(item.get("score", 0)) + int(news.get("score", 0))
+        item["score"] = new_score
+
+        if news.get("blocked"):
+            add_log(f"{symbol}: bloqueado por noticias recientes ({news.get('summary','')})", "WARNING")
+            continue
+        if new_score < min_score:
+            continue
+
+        out.append(item)
+
+    return out
+
+
 # PIONEX API
-# ============================================================
 def get_signature(params: dict, secret: str) -> str:
     sorted_params = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
     return hmac.new(
@@ -191,9 +550,18 @@ def cargar_pares_activos_desde_db():
 # ============================================================
 def scan_pairs(api_key: str, secret: str, config: dict):
     add_log("Escaneando pares del mercado...", "INFO")
-    min_volume = 500000
-    min_vol = 0.1
-    max_vol = 20.0
+    try:
+        min_volume = float(config.get("min_volume_24h", 5000000))
+    except Exception:
+        min_volume = 5000000
+    try:
+        min_vol = float(config.get("min_volatility", 0.1))
+    except Exception:
+        min_vol = 0.1
+    try:
+        max_vol = float(config.get("max_volatility", 20.0))
+    except Exception:
+        max_vol = 20.0
 
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
     if not response or not response.get("result"):
@@ -275,6 +643,28 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         return None
 
     try:
+        def _cfg_float(key: str, default: float) -> float:
+            try:
+                return float(config.get(key, default))
+            except Exception:
+                return default
+
+        def _cfg_int(key: str, default: int) -> int:
+            try:
+                return int(float(config.get(key, default)))
+            except Exception:
+                return default
+
+        rsi_min = _cfg_float("rsi_min", 35.0)
+        rsi_max = _cfg_float("rsi_max", 65.0)
+        min_score = _cfg_int("min_score", 75)
+        max_atr_pct = _cfg_float("max_atr_pct", 7.0)
+        adx_min = _cfg_float("adx_min", 15.0)
+        bb_width_min = _cfg_float("bb_width_min", 2.0)
+        bb_width_max = _cfg_float("bb_width_max", 6.0)
+        distancia_media_max = _cfg_float("distancia_media_max", 1.5)
+        vol_ratio_min = _cfg_float("vol_ratio_min", 1.0)
+
         rsi_series = RSIIndicator(close=df["close"], window=14).rsi()
         rsi = rsi_series.iloc[-1]
         rsi_prev = rsi_series.iloc[-2]
@@ -300,11 +690,14 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         ema20 = EMAIndicator(close=df["close"], window=20).ema_indicator().iloc[-1]
         precio_sobre_ema20 = precio_actual > ema20
         precio_sobre_ema50 = precio_actual > ema50
+        ema_tendencia = ema20 > ema50
 
         atr = AverageTrueRange(
             high=df["high"], low=df["low"], close=df["close"], window=14
         ).average_true_range().iloc[-1]
         atr_pct = (atr / precio_actual) * 100
+
+        adx = ADXIndicator(high=df["high"], low=df["low"], close=df["close"], window=14).adx().iloc[-1]
 
         vol_avg = df["volume"].tail(20).mean()
         vol_current = df["volume"].iloc[-1]
@@ -318,10 +711,10 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         if 40 <= rsi <= 55:
             score += 25
             razones.append(f"RSI óptimo ({round(rsi,1)})")
-        elif 35 <= rsi <= 60:
+        elif rsi_min <= rsi <= rsi_max:
             score += 15
             razones.append(f"RSI aceptable ({round(rsi,1)})")
-        elif 30 <= rsi <= 65:
+        elif (rsi_min - 5) <= rsi <= (rsi_max + 5):
             score += 5
 
         if rsi_subiendo and rsi < 60:
@@ -334,15 +727,19 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         elif macd_positivo or macd_creciendo:
             score += 10
 
-        if 2.0 <= bb_width <= 6.0 and distancia_media < 1.5:
+        if bb_width_min <= bb_width <= bb_width_max and distancia_media < distancia_media_max:
             score += 20
             razones.append(f"BB ideal ({round(bb_width,1)}%)")
-        elif 1.5 <= bb_width <= 8.0:
+        elif (bb_width_min - 0.5) <= bb_width <= (bb_width_max + 2.0):
             score += 10
 
-        if vol_creciente and vol_ratio > 1.0:
+        if vol_creciente and vol_ratio >= vol_ratio_min:
             score += 10
             razones.append("Volumen creciente")
+
+        if ema_tendencia and precio_sobre_ema20:
+            score += 10
+            razones.append("Tendencia EMA (20>50)")
 
         if precio_sobre_ema20 and precio_sobre_ema50:
             score += 10
@@ -350,7 +747,11 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         elif precio_sobre_ema20:
             score += 5
 
-        if atr_pct > 8.0:
+        if adx_min > 0 and adx >= adx_min:
+            score += 5
+            razones.append(f"ADX fuerte ({round(adx,1)})")
+
+        if atr_pct > max_atr_pct:
             add_log(f"{symbol}: ATR muy alto ({round(atr_pct,1)}%) - descartado", "WARNING")
             return None
 
@@ -368,7 +769,7 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
             "INFO"
         )
 
-        if score < 70:
+        if score < min_score:
             return None
 
         return {
@@ -380,6 +781,7 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
             "macd_hist": round(macd_hist, 6),
             "bb_width": round(bb_width, 2),
             "atr_pct": round(atr_pct, 2),
+            "adx": round(float(adx), 2),
             "vol_ratio": round(vol_ratio, 2),
             "score": score,
             "razones": ", ".join(razones)
@@ -408,6 +810,11 @@ def select_best_pairs(api_key: str, secret: str, candidates: list, config: dict)
         add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
         return []
 
+    analyzed = _apply_news_layer(analyzed, config)
+    if not analyzed:
+        add_log("Ningún par pasó el filtro de noticias", "WARNING")
+        return []
+
     analyzed.sort(key=lambda x: x["score"], reverse=True)
     best = analyzed[:max_bots]
 
@@ -434,6 +841,11 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
     take_profit = float(config.get("take_profit_pct", 1.0))
     stop_loss = float(config.get("stop_loss_pct", 5.0))
     modo_prueba = config.get("modo_prueba", "true") == "true"
+    try:
+        score_value = int(pair_info.get("score", 0))
+    except Exception:
+        score_value = 0
+    score_display = max(0, min(score_value, 100))
 
     if symbol in sistema_estado["pares_activos"]:
         add_log(f"Ya existe un bot activo para {symbol}, saltando...", "WARNING")
@@ -485,7 +897,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         sistema_estado["bots_activos"][bot_id] = bot_data
         sistema_estado["pares_activos"].add(symbol)
 
-        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {pair_info.get('score', 0)}", "SUCCESS")
+        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {score_value}", "SUCCESS")
 
         notify(
             f"🧪 <b>[PRUEBA] Bot simulado — Estrategia Pro</b>\n\n"
@@ -496,10 +908,11 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             f"⚡ Apalancamiento: <b>{leverage}x</b>\n"
             f"✅ Take Profit: <b>{take_profit}%</b>\n"
             f"🛑 Stop Loss: <b>{stop_loss}%</b>\n"
-            f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
+            f"📊 Score: <b>{score_display}/100</b>\n"
             f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
             f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n"
             f"⚡ ATR: <b>{pair_info.get('atr_pct', 0)}%</b>\n"
+            f"🗞 Noticias: <b>{pair_info.get('news_summary', '—')}</b>\n"
             f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>\n\n"
             f"👁 Seguimiento automático activado\n"
             f"⚠️ <i>Simulación - no es dinero real</i>"
@@ -541,8 +954,9 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
                 f"📊 Par: <b>{symbol}</b>\n"
                 f"💵 Precio: <b>${price}</b>\n"
                 f"📈 Rango: <b>${lower} — ${upper}</b>\n"
-                f"📊 Score: <b>{pair_info.get('score', 0)}/100</b>\n"
+                f"📊 Score: <b>{score_display}/100</b>\n"
                 f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
+                f"🗞 Noticias: <b>{pair_info.get('news_summary', '—')}</b>\n"
                 f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>"
             )
             return bot_id
@@ -721,7 +1135,7 @@ def reporte_diario():
         f"{'✅ El sistema está listo para modo real.' if tasa >= 60 else '⚠️ Continuar en modo prueba.'}"
     )
 
-    sistema_estado["ultimo_reporte"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sistema_estado["ultimo_reporte"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ============================================================
@@ -733,7 +1147,7 @@ def run_cycle(api_key: str, secret: str, config: dict):
     modo_prueba = config.get("modo_prueba", "true") == "true"
 
     add_log(f"=== CICLO #{ciclo_num} {'[PRUEBA]' if modo_prueba else '[REAL]'} ===", "INFO")
-    sistema_estado["ultimo_analisis"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sistema_estado["ultimo_analisis"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     candidates = scan_pairs(api_key, secret, config)
     if not candidates:
@@ -797,18 +1211,18 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             db.close()
 
             if ciclo_counter % 2 == 0:
-                run_cycle(api_key, secret, config)
+                await asyncio.to_thread(run_cycle, api_key, secret, config)
             else:
-                monitor_bots(api_key, secret, config)
+                await asyncio.to_thread(monitor_bots, api_key, secret, config)
 
             seguimiento_counter += 1
             if seguimiento_counter >= 8:
-                seguimiento_automatico(api_key, secret)
+                await asyncio.to_thread(seguimiento_automatico, api_key, secret)
                 seguimiento_counter = 0
 
             reporte_counter += 1
             if reporte_counter >= 48:
-                reporte_diario()
+                await asyncio.to_thread(reporte_diario)
                 reporte_counter = 0
 
             db = SessionLocal()

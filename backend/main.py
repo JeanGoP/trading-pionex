@@ -26,10 +26,18 @@ app = FastAPI(
     version="2.0.0"
 )
 
+cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+cors_allow_all = cors_origins_raw == "*"
+cors_origins = (
+    ["*"]
+    if cors_allow_all
+    else [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=not cors_allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -171,6 +179,7 @@ async def controlar_sistema(action: SistemaAction):
         sistema_estado["activo"] = False
         if trading_task:
             trading_task.cancel()
+            trading_task = None
         add_log("Sistema detenido por el usuario", "WARNING")
         return {"mensaje": "Sistema detenido", "estado": "inactivo"}
 
@@ -389,7 +398,7 @@ async def limpiar_bots_simulados():
     bots = db.query(Bot).filter(Bot.estado == "ACTIVO", Bot.modo_prueba == True).all()
     for bot in bots:
         bot.estado = "CERRADO"
-        bot.fecha_cierre = datetime.now()
+        bot.fecha_cierre = datetime.utcnow()
     db.commit()
     db.close()
     sistema_estado["bots_activos"] = {}
