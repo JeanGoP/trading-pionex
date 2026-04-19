@@ -917,6 +917,8 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         if score < min_score:
             return None
 
+        trend_bias = "bullish" if (ema20 > ema50 and precio_actual > ema20) else ("bearish" if (ema20 < ema50 and precio_actual < ema20) else "sideways")
+
         return {
             **pair_info,
             "rsi": round(rsi, 2),
@@ -927,6 +929,9 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
             "bb_width": round(bb_width, 2),
             "atr_pct": round(atr_pct, 2),
             "adx": round(float(adx), 2),
+            "ema20": round(float(ema20), 6),
+            "ema50": round(float(ema50), 6),
+            "trend_bias": trend_bias,
             "vol_ratio": round(vol_ratio, 2),
             "score": score,
             "razones": ", ".join(razones)
@@ -992,6 +997,18 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         score_value = 0
     score_display = max(0, min(score_value, 100))
 
+    adx_val = float(pair_info.get("adx", 0) or 0)
+    trend_bias = str(pair_info.get("trend_bias", "sideways"))
+    adx_lateral_max = 15.0
+    if adx_val < adx_lateral_max:
+        bot_type = "NEUTRAL_FUTURES_GRID"
+    elif trend_bias == "bullish":
+        bot_type = "LONG_FUTURES_GRID"
+    elif trend_bias == "bearish":
+        bot_type = "SHORT_FUTURES_GRID"
+    else:
+        bot_type = "NEUTRAL_FUTURES_GRID"
+
     if symbol in sistema_estado["pares_activos"]:
         add_log(f"Ya existe un bot activo para {symbol}, saltando...", "WARNING")
         return None
@@ -1042,7 +1059,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         sistema_estado["bots_activos"][bot_id] = bot_data
         sistema_estado["pares_activos"].add(symbol)
 
-        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {score_value}", "SUCCESS")
+        add_log(f"[PRUEBA] Bot simulado: {symbol} | ${price} | Score: {score_value} | Tipo: {bot_type}", "SUCCESS")
 
         notify(
             f"🧪 <b>[PRUEBA] Bot simulado — Estrategia Pro</b>\n\n"
@@ -1055,6 +1072,8 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             f"🛑 Stop Loss: <b>{stop_loss}%</b>\n"
             f"📊 Score: <b>{score_display}/100</b>\n"
             f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
+            f"🧭 Tipo bot: <b>{bot_type}</b>\n"
+            f"📐 ADX: <b>{pair_info.get('adx', 0)}</b> | Bias: <b>{trend_bias}</b>\n"
             f"📏 BB Width: <b>{pair_info.get('bb_width', 0)}%</b>\n"
             f"⚡ ATR: <b>{pair_info.get('atr_pct', 0)}%</b>\n"
             f"🗞 Noticias: <b>{pair_info.get('news_summary', '—')}</b>\n"
@@ -1067,7 +1086,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
     else:
         body = {
             "symbol": symbol,
-            "type": "NEUTRAL_FUTURES_GRID",
+            "type": bot_type,
             "leverageLevel": leverage,
             "lowerPrice": str(lower),
             "upperPrice": str(upper),
@@ -1079,6 +1098,13 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         }
 
         response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
+        used_type = bot_type
+
+        if (not response or not response.get("result")) and bot_type != "NEUTRAL_FUTURES_GRID":
+            add_log(f"{symbol}: tipo {bot_type} rechazado, fallback a NEUTRAL_FUTURES_GRID", "WARNING")
+            body["type"] = "NEUTRAL_FUTURES_GRID"
+            response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
+            used_type = "NEUTRAL_FUTURES_GRID"
 
         if response and response.get("result"):
             bot_id = response.get("data", {}).get("botId", f"BOT_{int(time.time())}")
@@ -1092,7 +1118,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             sistema_estado["bots_activos"][bot_id] = bot_data
             sistema_estado["pares_activos"].add(symbol)
 
-            add_log(f"Bot abierto: {symbol} | ID: {bot_id}", "SUCCESS")
+            add_log(f"Bot abierto: {symbol} | ID: {bot_id} | Tipo: {used_type}", "SUCCESS")
 
             notify(
                 f"🤖 <b>Bot abierto — Estrategia Pro</b>\n\n"
@@ -1101,6 +1127,8 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
                 f"📈 Rango: <b>${lower} — ${upper}</b>\n"
                 f"📊 Score: <b>{score_display}/100</b>\n"
                 f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
+                f"🧭 Tipo bot: <b>{used_type}</b>\n"
+                f"📐 ADX: <b>{pair_info.get('adx', 0)}</b> | Bias: <b>{trend_bias}</b>\n"
                 f"🗞 Noticias: <b>{pair_info.get('news_summary', '—')}</b>\n"
                 f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>"
             )
