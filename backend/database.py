@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -32,6 +32,7 @@ class Bot(Base):
     score = Column(Integer)
     rsi = Column(Float)
     bb_width = Column(Float)
+    bot_type = Column(String, default="NEUTRAL_FUTURES_GRID")
     estado = Column(String, default="ACTIVO")  # ACTIVO, CERRADO, STOP_LOSS
     ganancia = Column(Float, default=0.0)
     ganancia_pct = Column(Float, default=0.0)
@@ -110,6 +111,15 @@ class Seguimiento(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
+    try:
+        cols = db.execute(text("PRAGMA table_info(bots)")).fetchall()
+        col_names = {row[1] for row in cols}
+        if "bot_type" not in col_names:
+            db.execute(text("ALTER TABLE bots ADD COLUMN bot_type VARCHAR"))
+            db.execute(text("UPDATE bots SET bot_type = 'NEUTRAL_FUTURES_GRID' WHERE bot_type IS NULL"))
+            db.commit()
+    except Exception:
+        db.rollback()
 
     configs_iniciales = [
         ("modo_prueba", "true"),

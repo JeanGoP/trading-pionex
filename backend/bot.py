@@ -1029,6 +1029,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         "score": pair_info.get("score", 0),
         "rsi": pair_info.get("rsi", 0),
         "bb_width": pair_info.get("bb_width", 0),
+        "bot_type": bot_type,
         "modo_prueba": modo_prueba
     }
 
@@ -1108,6 +1109,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
 
         if response and response.get("result"):
             bot_id = response.get("data", {}).get("botId", f"BOT_{int(time.time())}")
+            bot_data["bot_type"] = used_type
             bot_data["bot_id"] = bot_id
             bot_data["estado"] = "ACTIVO"
 

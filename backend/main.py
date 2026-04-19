@@ -287,6 +287,7 @@ async def get_bots(estado: Optional[str] = None, limit: int = 50):
             "score": b.score,
             "rsi": b.rsi,
             "bb_width": b.bb_width,
+            "bot_type": b.bot_type or "NEUTRAL_FUTURES_GRID",
             "estado": b.estado,
             "ganancia": b.ganancia,
             "ganancia_pct": b.ganancia_pct,

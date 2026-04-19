@@ -342,10 +342,10 @@
         <div class="table-wrapper">
           <table>
             <thead>
-              <tr><th>Par</th><th>Entrada</th><th>Score</th><th>RSI</th><th>Estado</th><th>Ganancia</th><th>Acciones</th></tr>
+              <tr><th>Par</th><th>Entrada</th><th>Tipo</th><th>Score</th><th>RSI</th><th>Estado</th><th>Ganancia</th><th>Acciones</th></tr>
             </thead>
             <tbody id="bots-table">
-              <tr><td colspan="7" class="loading">Sin datos aún</td></tr>
+              <tr><td colspan="8" class="loading">Sin datos aún</td></tr>
             </tbody>
           </table>
         </div>
@@ -644,11 +644,12 @@
       const bots = await res.json();
       const tbody = document.getElementById('bots-table');
       document.getElementById('bots-count').textContent = bots.length + ' bots';
-      if (bots.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">Sin bots aún</td></tr>'; return; }
+      if (bots.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text2);padding:20px">Sin bots aún</td></tr>'; return; }
       tbody.innerHTML = bots.map(b => `
         <tr>
           <td><strong>${b.symbol.replace('_USDT', '')}</strong><br><span style="font-size:10px;color:var(--text2)">${b.modo_prueba ? '🧪' : '💰'}</span></td>
           <td>$${b.precio_entrada.toFixed(4)}</td>
+          <td><span class="badge badge-info">${(b.bot_type || 'NEUTRAL_FUTURES_GRID').includes('LONG') ? 'LONG' : (b.bot_type || 'NEUTRAL_FUTURES_GRID').includes('SHORT') ? 'SHORT' : 'NEUTRAL'}</span></td>
           <td><span class="badge badge-info">${b.score}</span></td>
           <td>${b.rsi}</td>
           <td><span class="badge ${b.estado === 'ACTIVO' ? 'badge-success' : b.estado === 'STOP_LOSS' ? 'badge-danger' : 'badge-warning'}">${b.estado}</span></td>
