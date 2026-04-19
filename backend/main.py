@@ -110,7 +110,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 "sistema_activo": sistema_estado["activo"],
                 "modo_prueba": sistema_estado["modo_prueba"],
                 "ultimo_analisis": sistema_estado["ultimo_analisis"],
-                "bots_activos": len(sistema_estado["bots_activos"])
+                "bots_activos": len(sistema_estado["bots_activos"]),
+                "telegram": get_telegram_status(),
+                "ultimo_heartbeat": sistema_estado.get("ultimo_heartbeat"),
+                "ultimo_seguimiento": sistema_estado.get("ultimo_seguimiento")
             }
         }))
 
@@ -154,6 +157,9 @@ async def get_estado():
         "ciclo_actual": sistema_estado["ciclo_actual"],
         "ultimo_analisis": sistema_estado["ultimo_analisis"],
         "bots_activos": len(sistema_estado["bots_activos"]),
+        "telegram": get_telegram_status(),
+        "ultimo_heartbeat": sistema_estado.get("ultimo_heartbeat"),
+        "ultimo_seguimiento": sistema_estado.get("ultimo_seguimiento"),
         "stats": stats,
         "config": config
     }

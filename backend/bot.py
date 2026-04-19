@@ -78,6 +78,8 @@ sistema_estado = {
     "pares_activos": set(),
     "ultimo_analisis": None,
     "ultimo_reporte": None,
+    "ultimo_heartbeat": None,
+    "ultimo_seguimiento": None,
     "logs": [],
     "websocket_clients": set()
 }
@@ -559,6 +561,23 @@ def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
     return 0.0
 
 
+def get_precios_actuales(api_key: str, secret: str) -> dict:
+    response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
+    if not response or not response.get("result"):
+        return {}
+    tickers = response.get("data", {}).get("tickers", [])
+    out = {}
+    for t in tickers:
+        sym = t.get("symbol")
+        if not sym:
+            continue
+        try:
+            out[sym] = float(t.get("close", 0))
+        except Exception:
+            continue
+    return out
+
+
 # ============================================================
 # CARGAR PARES ACTIVOS DESDE DB AL INICIO
 # ============================================================
@@ -1023,14 +1042,15 @@ def monitor_bots(api_key: str, secret: str, config: dict):
 
         if bots_activos < max_bots:
             add_log("Iniciando nuevo ciclo de análisis...", "INFO")
-            run_cycle(api_key, secret, config)
-        return
+            ciclo = run_cycle(api_key, secret, config)
+            return {"tipo": "monitor_prueba", "bots_activos": bots_activos, "max_bots": max_bots, "accion": "run_cycle", "ciclo": ciclo}
+        return {"tipo": "monitor_prueba", "bots_activos": bots_activos, "max_bots": max_bots, "accion": "sin_accion"}
 
     bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list",
                                           params={"status": "RUNNING"})
     if not bots_pionex_response or not bots_pionex_response.get("result"):
         add_log("Error obteniendo bots de Pionex", "ERROR")
-        return
+        return {"tipo": "monitor_real", "accion": "error_listado"}
 
     bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
     pares_corriendo = {b.get("symbol") for b in bots_corriendo}
@@ -1051,9 +1071,12 @@ def monitor_bots(api_key: str, secret: str, config: dict):
 
         if balance >= investment:
             add_log("Reinvirtiendo automáticamente...", "SUCCESS")
-            run_cycle(api_key, secret, config)
+            ciclo = run_cycle(api_key, secret, config)
+            return {"tipo": "monitor_real", "bots_activos": len(bots_corriendo), "max_bots": max_bots, "accion": "reinvertir", "ciclo": ciclo}
         else:
             add_log(f"Balance insuficiente: ${balance:.2f} < ${investment:.2f}", "WARNING")
+            return {"tipo": "monitor_real", "bots_activos": len(bots_corriendo), "max_bots": max_bots, "accion": "balance_insuficiente", "balance": balance, "investment": investment}
+    return {"tipo": "monitor_real", "bots_activos": len(bots_corriendo), "max_bots": max_bots, "accion": "sin_accion"}
 
 
 # ============================================================
@@ -1063,19 +1086,32 @@ def seguimiento_automatico(api_key: str, secret: str):
     add_log("Ejecutando seguimiento automático...", "INFO")
 
     db = SessionLocal()
+    config = get_configuracion(db)
     pendientes = get_seguimientos_pendientes(db)
     db.close()
 
     if not pendientes:
         add_log("Sin seguimientos pendientes", "INFO")
-        return
+        mensaje = "👁 <b>Seguimiento</b>\n\nSin seguimientos pendientes."
+        notify(mensaje)
+        sistema_estado["ultimo_seguimiento"] = {
+            "utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "pendientes": 0,
+            "mensaje": mensaje
+        }
+        return {"pendientes": 0}
 
     add_log(f"Seguimientos pendientes: {len(pendientes)}", "INFO")
+    prices = get_precios_actuales(api_key, secret)
+    top_n = _cfg_int(config, "telegram_followup_top_n", 5)
+    summary_lines = []
+    resultados = {"GANADO": 0, "STOP_LOSS": 0, "EXPIRADO": 0, "PENDIENTE": 0, "SIN_PRECIO": 0}
 
     for seg in pendientes:
         try:
-            precio_actual = get_precio_actual(api_key, secret, seg.symbol)
+            precio_actual = float(prices.get(seg.symbol, 0))
             if precio_actual <= 0:
+                resultados["SIN_PRECIO"] += 1
                 continue
 
             horas = int((datetime.utcnow() - seg.fecha_apertura).total_seconds() / 3600)
@@ -1096,6 +1132,7 @@ def seguimiento_automatico(api_key: str, secret: str):
                 resultado = "STOP_LOSS"
             elif horas >= 72:
                 resultado = "EXPIRADO"
+            resultados[resultado] = resultados.get(resultado, 0) + 1
 
             db = SessionLocal()
             actualizar_seguimiento(db, seg.id, {
@@ -1129,12 +1166,39 @@ def seguimiento_automatico(api_key: str, secret: str):
                     f"🏆 Resultado: <b>{resultado}</b>\n"
                     f"📊 Score original: <b>{seg.score}/100</b>"
                 )
+            else:
+                if len(summary_lines) < top_n:
+                    try:
+                        delta_pct = ((precio_actual - seg.precio_entrada) / seg.precio_entrada) * 100
+                    except Exception:
+                        delta_pct = 0.0
+                    mark = "✓" if dentro_rango else "✗"
+                    summary_lines.append(f"• {seg.symbol}: ${precio_actual:.6g} ({delta_pct:+.2f}%) rango {mark} | {horas}h")
 
             time.sleep(0.5)
 
         except Exception as e:
             add_log(f"Error en seguimiento de {seg.symbol}: {e}", "ERROR")
 
+    enabled_followup = _cfg_bool(config, "telegram_followup_enabled", True)
+
+    if enabled_followup:
+        lines = "\n".join(summary_lines) if summary_lines else "Sin detalle disponible."
+        mensaje = (
+            "👁 <b>Seguimiento (estado)</b>\n\n"
+            f"Pendientes: <b>{len(pendientes)}</b>\n"
+            f"✅ Ganado: <b>{resultados.get('GANADO', 0)}</b> | ❌ SL: <b>{resultados.get('STOP_LOSS', 0)}</b> | ⏰ Exp: <b>{resultados.get('EXPIRADO', 0)}</b>\n\n"
+            f"{lines}"
+        )
+        notify(mensaje)
+        sistema_estado["ultimo_seguimiento"] = {
+            "utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "pendientes": len(pendientes),
+            "resultados": resultados,
+            "mensaje": mensaje
+        }
+
+    return {"pendientes": len(pendientes), "resultados": resultados}
 
 # ============================================================
 # REPORTE DIARIO
@@ -1196,13 +1260,13 @@ def run_cycle(api_key: str, secret: str, config: dict):
     candidates = scan_pairs(api_key, secret, config)
     if not candidates:
         add_log("No se encontraron candidatos", "WARNING")
-        return
+        return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_candidatos"}
 
     best_pairs = select_best_pairs(api_key, secret, candidates, config)
     if not best_pairs:
         add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
         notify("⚠️ <b>Ningún par pasó la estrategia profesional</b>\nEl sistema seguirá monitoreando.")
-        return
+        return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": len(candidates), "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_seleccion"}
 
     bots_abiertos = 0
     for pair in best_pairs:
@@ -1222,6 +1286,7 @@ def run_cycle(api_key: str, secret: str, config: dict):
     db.close()
 
     add_log(f"Ciclo #{ciclo_num} completado. Bots abiertos: {bots_abiertos}", "SUCCESS")
+    return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": len(candidates), "seleccionados": len(best_pairs), "bots_abiertos": bots_abiertos, "resultado": "ok"}
 
 
 # ============================================================
@@ -1247,6 +1312,8 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
     ciclo_counter = 0
     seguimiento_counter = 0
     reporte_counter = 0
+    last_heartbeat_ts = 0.0
+    last_error_notify_ts = 0.0
 
     while sistema_estado["activo"]:
         try:
@@ -1254,10 +1321,11 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             config = get_configuracion(db)
             db.close()
 
+            step_result = None
             if ciclo_counter % 2 == 0:
-                await asyncio.to_thread(run_cycle, api_key, secret, config)
+                step_result = await asyncio.to_thread(run_cycle, api_key, secret, config)
             else:
-                await asyncio.to_thread(monitor_bots, api_key, secret, config)
+                step_result = await asyncio.to_thread(monitor_bots, api_key, secret, config)
 
             seguimiento_counter += 1
             if seguimiento_counter >= 8:
@@ -1271,14 +1339,56 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
 
             db = SessionLocal()
             stats = get_estadisticas(db)
+            pendientes = 0
+            try:
+                pendientes = len(get_seguimientos_pendientes(db))
+            except Exception:
+                pendientes = 0
             db.close()
+
+            heartbeat_enabled = _cfg_bool(config, "telegram_heartbeat_enabled", True)
+            heartbeat_minutes = _cfg_int(config, "telegram_heartbeat_minutes", 30)
+            interval_s = max(60, heartbeat_minutes * 60)
+            now_ts = time.time()
+            if heartbeat_enabled and (now_ts - last_heartbeat_ts) >= interval_s - 2:
+                modo = "PRUEBA" if config.get("modo_prueba", "true") == "true" else "REAL"
+                extra = ""
+                if isinstance(step_result, dict):
+                    if "resultado" in step_result:
+                        extra = f"\nResultado: <b>{step_result.get('resultado')}</b>"
+                    elif "accion" in step_result:
+                        extra = f"\nAcción: <b>{step_result.get('accion')}</b>"
+                mensaje = (
+                    f"⏱ <b>Update {heartbeat_minutes}m</b>\n\n"
+                    f"Modo: <b>{modo}</b>\n"
+                    f"Ciclo: <b>#{sistema_estado['ciclo_actual']}</b>\n"
+                    f"Bots activos: <b>{len(sistema_estado['bots_activos'])}</b>\n"
+                    f"Pendientes seguimiento: <b>{pendientes}</b>\n"
+                    f"Ganancia total: <b>${stats.get('ganancia_total', 0)}</b>\n"
+                    f"Último análisis: <b>{sistema_estado.get('ultimo_analisis') or '--'}</b>"
+                    f"{extra}"
+                )
+                notify(mensaje)
+                sistema_estado["ultimo_heartbeat"] = {
+                    "utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "minutos": heartbeat_minutes,
+                    "ciclo": sistema_estado.get("ciclo_actual", 0),
+                    "bots_activos": len(sistema_estado.get("bots_activos", {})),
+                    "pendientes_seguimiento": pendientes,
+                    "ganancia_total": stats.get("ganancia_total", 0),
+                    "mensaje": mensaje
+                }
+                last_heartbeat_ts = now_ts
 
             await broadcast_update({
                 "type": "stats_update",
                 "data": stats,
                 "logs": sistema_estado["logs"][-10:],
                 "ultimo_analisis": sistema_estado["ultimo_analisis"],
-                "bots_activos": len(sistema_estado["bots_activos"])
+                "bots_activos": len(sistema_estado["bots_activos"]),
+                "telegram": get_telegram_status(),
+                "ultimo_heartbeat": sistema_estado.get("ultimo_heartbeat"),
+                "ultimo_seguimiento": sistema_estado.get("ultimo_seguimiento")
             })
 
             ciclo_counter += 1
@@ -1286,6 +1396,10 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
 
         except Exception as e:
             add_log(f"Error en trading loop: {e}", "ERROR")
+            now_ts = time.time()
+            if now_ts - last_error_notify_ts > 1800:
+                notify(f"⚠️ <b>Error en trading loop</b>\n\n{str(e)[:300]}")
+                last_error_notify_ts = now_ts
             await asyncio.sleep(60)
 
     add_log("Sistema de trading detenido", "WARNING")

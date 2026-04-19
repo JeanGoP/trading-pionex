@@ -209,6 +209,31 @@
 
       <div class="card">
         <div class="card-header">
+          <span class="card-title">Estado en vivo</span>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div>
+              <div class="metric-label">Heartbeat</div>
+              <div style="font-size:12px" id="op-heartbeat-time">--</div>
+              <div style="font-size:12px;color:var(--text2);white-space:pre-line" id="op-heartbeat-msg">--</div>
+            </div>
+            <div>
+              <div class="metric-label">Seguimiento</div>
+              <div style="font-size:12px" id="op-followup-time">--</div>
+              <div style="font-size:12px;color:var(--text2);white-space:pre-line" id="op-followup-msg">--</div>
+            </div>
+            <div>
+              <div class="metric-label">Telegram</div>
+              <div style="font-size:12px" id="op-telegram-status">--</div>
+              <div style="font-size:12px;color:var(--text2);white-space:pre-line" id="op-telegram-error">--</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
           <span class="card-title">Configuración</span>
           <button class="btn btn-outline" style="width:auto;padding:4px 12px;font-size:12px" onclick="guardarConfig()">Guardar</button>
         </div>
@@ -355,6 +380,7 @@
         actualizarStats(msg.data.stats);
         actualizarConfig(msg.data.config);
         actualizarEstado(msg.data.sistema_activo, msg.data.modo_prueba);
+        actualizarOperativo(msg.data);
         if (msg.data.logs) renderLogs(msg.data.logs);
         if (msg.data.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.data.ultimo_analisis;
@@ -365,6 +391,7 @@
 
       if (msg.type === 'stats_update') {
         actualizarStats(msg.data);
+        actualizarOperativo(msg);
         if (msg.logs) renderLogs(msg.logs);
         if (msg.ultimo_analisis) {
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.ultimo_analisis;
@@ -439,6 +466,41 @@
     badge.textContent = modoPrueba ? 'PRUEBA' : 'REAL';
     if (modoPrueba) badge.classList.remove('real');
     else badge.classList.add('real');
+  }
+
+  function limpiarTags(html) {
+    if (!html) return '';
+    return String(html).replace(/<[^>]*>/g, '').trim();
+  }
+
+  function actualizarOperativo(payload) {
+    if (!payload) return;
+
+    const hb = payload.ultimo_heartbeat || null;
+    const seg = payload.ultimo_seguimiento || null;
+    const tg = payload.telegram || null;
+
+    const hbTime = hb && hb.utc ? hb.utc : '--';
+    const hbMsg = hb
+      ? `Ciclo: ${hb.ciclo ?? '--'} | Bots: ${hb.bots_activos ?? '--'} | Pendientes: ${hb.pendientes_seguimiento ?? '--'} | Ganancia: $${hb.ganancia_total ?? 0}`
+      : '--';
+    document.getElementById('op-heartbeat-time').textContent = hbTime;
+    document.getElementById('op-heartbeat-msg').textContent = hbMsg;
+
+    const segTime = seg && seg.utc ? seg.utc : '--';
+    const segMsg = seg
+      ? `Pendientes: ${seg.pendientes ?? '--'}\n${limpiarTags(seg.mensaje || '')}`
+      : '--';
+    document.getElementById('op-followup-time').textContent = segTime;
+    document.getElementById('op-followup-msg').textContent = segMsg;
+
+    const ok = tg && tg.sent_ok != null ? tg.sent_ok : 0;
+    const fail = tg && tg.sent_fail != null ? tg.sent_fail : 0;
+    const q = tg && tg.queue_size != null ? tg.queue_size : 0;
+    const lastOk = tg && tg.last_ok_utc ? tg.last_ok_utc : '--';
+    const lastFail = tg && tg.last_fail_utc ? tg.last_fail_utc : '--';
+    document.getElementById('op-telegram-status').textContent = `OK: ${ok} | Fail: ${fail} | Cola: ${q}\nÚltimo OK: ${lastOk}\nÚltimo Fail: ${lastFail}`;
+    document.getElementById('op-telegram-error').textContent = tg && tg.last_error ? String(tg.last_error) : '--';
   }
 
   function renderLogs(logs) {

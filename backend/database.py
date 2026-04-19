@@ -141,6 +141,10 @@ def init_db():
         ("news_cache_minutes", "15"),
         ("news_block_keywords", "hack,exploit,breach,bankruptcy,insolvency,investigation,sec,lawsuit,delist,delisting,suspended,halt,scam,rug,attack,vulnerability"),
         ("news_positive_keywords", "partnership,listing,listed,integrates,adoption,upgrade,launch,mainnet,ETF,approval,record,breakout"),
+        ("telegram_heartbeat_enabled", "true"),
+        ("telegram_heartbeat_minutes", "30"),
+        ("telegram_followup_enabled", "true"),
+        ("telegram_followup_top_n", "5"),
     ]
 
     for clave, valor in configs_iniciales:
