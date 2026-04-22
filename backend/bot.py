@@ -545,7 +545,20 @@ def pionex_request(api_key: str, secret: str, method: str, endpoint: str, params
             response = requests.get(url, params=params, headers=headers, timeout=10)
         else:
             response = requests.post(url, params=params, json=body, headers=headers, timeout=10)
-        return response.json()
+        try:
+            payload = response.json()
+        except Exception:
+            raw = ""
+            try:
+                raw = (response.text or "")[:500]
+            except Exception:
+                raw = ""
+            add_log(f"Error API Pionex: respuesta no JSON ({response.status_code}) {raw}", "ERROR")
+            return {"result": False, "error": f"http_{response.status_code}", "raw": raw}
+
+        if response.status_code != 200:
+            add_log(f"Error API Pionex HTTP {response.status_code}: {str(payload)[:500]}", "ERROR")
+        return payload
     except Exception as e:
         add_log(f"Error API Pionex: {e}", "ERROR")
         return None
@@ -1099,12 +1112,15 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         }
 
         response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
+        response_primary = response
+        response_fallback = None
         used_type = bot_type
 
         if (not response or not response.get("result")) and bot_type != "NEUTRAL_FUTURES_GRID":
             add_log(f"{symbol}: tipo {bot_type} rechazado, fallback a NEUTRAL_FUTURES_GRID", "WARNING")
             body["type"] = "NEUTRAL_FUTURES_GRID"
             response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
+            response_fallback = response
             used_type = "NEUTRAL_FUTURES_GRID"
 
         if response and response.get("result"):
@@ -1136,7 +1152,15 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             )
             return bot_id
         else:
-            add_log(f"Error abriendo bot en {symbol}", "ERROR")
+            detail = str(response) if response is not None else "no_response"
+            p = str(response_primary) if response_primary is not None else "no_response"
+            f = str(response_fallback) if response_fallback is not None else ""
+            add_log(
+                f"Error abriendo bot en {symbol} | tipo={used_type} | "
+                f"amount={investment} lev={leverage} grids={grid_count} range={lower}-{upper} | "
+                f"resp={detail[:350]} | primary={p[:250]} | fallback={f[:250]}",
+                "ERROR"
+            )
             return None
 
 
@@ -1365,6 +1389,26 @@ def run_cycle(api_key: str, secret: str, config: dict):
     sistema_estado["ciclo_actual"] += 1
     ciclo_num = sistema_estado["ciclo_actual"]
     modo_prueba = config.get("modo_prueba", "true") == "true"
+    try:
+        max_bots = int(float(config.get("max_active_bots", 2)))
+    except Exception:
+        max_bots = 2
+
+    bots_actuales = 0
+    if modo_prueba:
+        bots_actuales = len(sistema_estado.get("bots_activos", {}))
+    else:
+        bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
+        if not bots_pionex_response or not bots_pionex_response.get("result"):
+            add_log("No se pudo verificar bots activos en Pionex (se omite apertura por seguridad)", "ERROR")
+            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "error_listado"}
+        bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
+        bots_actuales = len(bots_corriendo)
+
+    slots = max(0, max_bots - bots_actuales)
+    if slots <= 0:
+        add_log(f"Máximo de bots alcanzado ({bots_actuales}/{max_bots}) - no se abren bots", "INFO")
+        return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "max_bots_alcanzado"}
 
     add_log(f"=== CICLO #{ciclo_num} {'[PRUEBA]' if modo_prueba else '[REAL]'} ===", "INFO")
     sistema_estado["ultimo_analisis"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -1374,7 +1418,9 @@ def run_cycle(api_key: str, secret: str, config: dict):
         add_log("No se encontraron candidatos", "WARNING")
         return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_candidatos"}
 
-    best_pairs = select_best_pairs(api_key, secret, candidates, config)
+    config_limitada = dict(config)
+    config_limitada["max_active_bots"] = str(slots)
+    best_pairs = select_best_pairs(api_key, secret, candidates, config_limitada)
     if not best_pairs:
         add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
         notify("⚠️ <b>Ningún par pasó la estrategia profesional</b>\nEl sistema seguirá monitoreando.")
