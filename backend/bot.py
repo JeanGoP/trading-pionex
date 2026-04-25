@@ -5,6 +5,7 @@ import time
 import hmac
 import hashlib
 import asyncio
+import json
 import os
 import threading
 import queue
@@ -521,30 +522,51 @@ def _apply_news_layer(analyzed: list, config: dict) -> list:
 
 
 # PIONEX API
-def get_signature(params: dict, secret: str) -> str:
-    sorted_params = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+def get_signature(method: str, endpoint: str, params: dict, secret: str, body=None) -> str:
+    method = (method or "GET").upper()
+    params = params or {}
+
+    sorted_items = sorted(params.items(), key=lambda kv: str(kv[0]))
+    query = "&".join(f"{k}={v}" for k, v in sorted_items)
+    path_url = endpoint + (f"?{query}" if query else "")
+
+    sign_payload = f"{method}{path_url}"
+    if method in {"POST", "DELETE"} and body is not None:
+        body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        sign_payload += body_str
+
     return hmac.new(
         secret.encode("utf-8"),
-        sorted_params.encode("utf-8"),
-        hashlib.sha256
+        sign_payload.encode("utf-8"),
+        hashlib.sha256,
     ).hexdigest()
 
 
 def pionex_request(api_key: str, secret: str, method: str, endpoint: str, params=None, body=None):
+    method = (method or "GET").upper()
     if params is None:
         params = {}
     params["timestamp"] = int(time.time() * 1000)
-    params["KEY"] = api_key
-    params["SIGN"] = get_signature(params, secret)
 
     url = PIONEX_BASE_URL + endpoint
-    headers = {"Content-Type": "application/json"}
+    signature = get_signature(method, endpoint, params, secret, body=body)
+    headers = {
+        "Content-Type": "application/json",
+        "PIONEX-KEY": api_key,
+        "PIONEX-SIGNATURE": signature,
+    }
 
     try:
         if method == "GET":
             response = requests.get(url, params=params, headers=headers, timeout=10)
+        elif method == "POST":
+            body_str = "" if body is None else json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+            response = requests.post(url, params=params, data=body_str, headers=headers, timeout=10)
+        elif method == "DELETE":
+            body_str = "" if body is None else json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+            response = requests.delete(url, params=params, data=body_str, headers=headers, timeout=10)
         else:
-            response = requests.post(url, params=params, json=body, headers=headers, timeout=10)
+            raise ValueError(f"unsupported_method:{method}")
         try:
             payload = response.json()
         except Exception:
@@ -1399,11 +1421,20 @@ def run_cycle(api_key: str, secret: str, config: dict):
         bots_actuales = len(sistema_estado.get("bots_activos", {}))
     else:
         bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
-        if not bots_pionex_response or not bots_pionex_response.get("result"):
-            add_log("No se pudo verificar bots activos en Pionex (se omite apertura por seguridad)", "ERROR")
-            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "error_listado"}
-        bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
-        bots_actuales = len(bots_corriendo)
+        if bots_pionex_response and bots_pionex_response.get("result"):
+            bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
+            bots_actuales = len(bots_corriendo)
+        else:
+            db = SessionLocal()
+            try:
+                bots_actuales = (
+                    db.query(Bot)
+                    .filter(Bot.estado == "ACTIVO", Bot.modo_prueba == False)
+                    .count()
+                )
+            finally:
+                db.close()
+            add_log("No se pudo verificar bots activos en Pionex; se usa DB para calcular límite (puede estar desfasado)", "WARNING")
 
     slots = max(0, max_bots - bots_actuales)
     if slots <= 0:
