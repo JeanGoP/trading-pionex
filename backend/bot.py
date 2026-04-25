@@ -1493,7 +1493,7 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
     db = SessionLocal()
     config_inicial = get_configuracion(db)
     db.close()
-    loop_minutes = max(1, _cfg_int(config_inicial, "loop_interval_minutes", 30))
+    loop_minutes = max(1, _cfg_int(config_inicial, "loop_interval_minutes", 10))
 
     notify(
         f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
@@ -1587,7 +1587,7 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             })
 
             ciclo_counter += 1
-            loop_minutes = max(1, _cfg_int(config, "loop_interval_minutes", 30))
+            loop_minutes = max(1, _cfg_int(config, "loop_interval_minutes", 10))
             await asyncio.sleep(max(60, loop_minutes * 60))
 
         except Exception as e:
