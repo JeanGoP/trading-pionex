@@ -64,6 +64,39 @@ PARES_FUTURES_VALIDOS = {
     "BCH_USDT_PERP",
     "UNI_USDT_PERP",
     "ATOM_USDT_PERP",
+    "OP_USDT_PERP",
+    "ARB_USDT_PERP",
+    "APT_USDT_PERP",
+    "FIL_USDT_PERP",
+    "NEAR_USDT_PERP",
+    "INJ_USDT_PERP",
+    "SUI_USDT_PERP",
+    "TRX_USDT_PERP",
+    "TON_USDT_PERP",
+    "WLD_USDT_PERP",
+    "AAVE_USDT_PERP",
+    "CRV_USDT_PERP",
+    "ENS_USDT_PERP",
+    "DYDX_USDT_PERP",
+    "ICP_USDT_PERP",
+    "FTM_USDT_PERP",
+    "SHIB_USDT_PERP",
+    "RUNE_USDT_PERP",
+    "LDO_USDT_PERP",
+    "PYTH_USDT_PERP",
+    "JUP_USDT_PERP",
+    "JTO_USDT_PERP",
+    "TIA_USDT_PERP",
+    "SEI_USDT_PERP",
+    "WIF_USDT_PERP",
+    "BONK_USDT_PERP",
+    "PEPE_USDT_PERP",
+    "ORDI_USDT_PERP",
+    "AI_USDT_PERP",
+    "ACE_USDT_PERP",
+    "AUCTION_USDT_PERP",
+    "RENDER_USDT_PERP",
+    "ENA_USDT_PERP",
 }
 
 # Estado global del sistema
@@ -1427,6 +1460,19 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
                 bu_order_data = fixed_data
 
             if not check_resp or not check_resp.get("result"):
+                msg2 = str((check_resp or {}).get("message") or "").lower()
+                if "less than min investment" in msg2:
+                    min_inv_raw = ((check_resp or {}).get("data") or {}).get("minInvestment")
+                    try:
+                        min_inv = float(min_inv_raw) if min_inv_raw is not None else None
+                    except Exception:
+                        min_inv = None
+                    if min_inv is not None:
+                        add_log(
+                            f"Se omite {symbol}: inversión por bot ({investment}) menor al mínimo requerido por Pionex ({min_inv}).",
+                            "WARNING",
+                        )
+                        return None
                 add_log(f"Parámetros rechazados por Pionex (futuresGrid/checkParams): {str(check_resp)[:450]}", "ERROR")
                 return None
 
@@ -1767,7 +1813,7 @@ def run_cycle(api_key: str, secret: str, config: dict):
         return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_candidatos"}
 
     config_limitada = dict(config)
-    config_limitada["max_active_bots"] = str(slots)
+    config_limitada["max_active_bots"] = str(min(len(candidates), max(slots, 1) * 5))
     best_pairs = select_best_pairs(api_key, secret, candidates, config_limitada)
     if not best_pairs:
         add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
@@ -1776,6 +1822,8 @@ def run_cycle(api_key: str, secret: str, config: dict):
 
     bots_abiertos = 0
     for pair in best_pairs:
+        if bots_abiertos >= slots:
+            break
         bot_id = abrir_bot(api_key, secret, pair, config)
         if bot_id:
             bots_abiertos += 1
