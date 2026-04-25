@@ -130,6 +130,7 @@ def init_db():
         ("stop_loss_pct", "5.0"),
         ("grid_count", "60"),
         ("max_active_bots", "2"),
+        ("loop_interval_minutes", "10"),
         ("price_range_pct", "5.0"),
         ("min_volume_24h", "5000000"),
         ("min_volatility", "2.0"),

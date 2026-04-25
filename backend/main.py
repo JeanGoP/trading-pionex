@@ -244,6 +244,8 @@ async def update_config(update: ConfigUpdate):
 
     if update.clave == "modo_prueba":
         sistema_estado["modo_prueba"] = update.valor == "true"
+    if update.clave == "loop_interval_minutes":
+        sistema_estado["wake_sleep"] = True
 
     add_log(f"Configuración actualizada: {update.clave} = {update.valor}", "INFO")
     return {"mensaje": "Configuración actualizada", "clave": update.clave, "valor": update.valor}
@@ -255,6 +257,8 @@ async def update_config_batch(updates: dict):
     for clave, valor in updates.items():
         actualizar_configuracion(db, clave, str(valor))
     db.close()
+    if "loop_interval_minutes" in updates:
+        sistema_estado["wake_sleep"] = True
     add_log("Configuración actualizada en lote", "INFO")
     return {"mensaje": "Configuración actualizada correctamente"}
 

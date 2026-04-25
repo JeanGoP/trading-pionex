@@ -1733,6 +1733,7 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             await broadcast_update({
                 "type": "stats_update",
                 "data": stats,
+                "config": config,
                 "logs": sistema_estado["logs"][-10:],
                 "ultimo_analisis": sistema_estado["ultimo_analisis"],
                 "bots_activos": len(sistema_estado["bots_activos"]),
@@ -1743,7 +1744,13 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
 
             ciclo_counter += 1
             loop_minutes = max(1, _cfg_int(config, "loop_interval_minutes", 10))
-            await asyncio.sleep(max(60, loop_minutes * 60))
+            sleep_s = max(60, loop_minutes * 60)
+            end_ts = time.time() + sleep_s
+            while sistema_estado.get("activo") and time.time() < end_ts:
+                if sistema_estado.pop("wake_sleep", False):
+                    break
+                remaining = end_ts - time.time()
+                await asyncio.sleep(min(5, max(0.0, remaining)))
 
         except Exception as e:
             add_log(f"Error en trading loop: {e}", "ERROR")

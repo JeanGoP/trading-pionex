@@ -269,7 +269,7 @@
           </div>
           <div class="config-item">
             <label class="config-label">Intervalo de verificación (min)</label>
-            <input type="number" class="config-input" id="cfg-loop-minutes" value="30" min="1" step="1">
+            <input type="number" class="config-input" id="cfg-loop-minutes" value="10" min="1" step="1">
           </div>
 
           <div class="divider"></div>
@@ -385,13 +385,13 @@
   let gananciaData = [];
   let proximoAnalisis = null;
   let countdownInterval = null;
-  let intervaloMs = 30 * 60 * 1000;
+  let intervaloMs = 10 * 60 * 1000;
   let ultimoAnalisisActual = null;
 
   function aplicarIntervaloDesdeConfig(config) {
     if (!config) return;
     const raw = config.loop_interval_minutes ?? config.loop_interval_minutos ?? config.loop_interval ?? null;
-    const minutes = Math.max(1, parseInt(raw, 10) || 30);
+    const minutes = Math.max(1, parseInt(raw, 10) || 10);
     intervaloMs = minutes * 60 * 1000;
     const el = document.getElementById('cfg-loop-minutes');
     if (el) el.value = String(minutes);
@@ -469,6 +469,10 @@
 
       if (msg.type === 'stats_update') {
         actualizarStats(msg.data);
+        if (msg.config) {
+          actualizarConfig(msg.config);
+          aplicarIntervaloDesdeConfig(msg.config);
+        }
         actualizarOperativo(msg);
         if (msg.logs) renderLogs(msg.logs);
         if (msg.ultimo_analisis) {
@@ -789,6 +793,7 @@
     };
     try {
       await fetch(`${API}/api/configuracion/batch`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+      aplicarIntervaloDesdeConfig(config);
       showNotification('Configuración guardada', 'success');
     } catch (e) { showNotification('Error guardando configuración', 'error'); }
   }
