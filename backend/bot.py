@@ -49,25 +49,21 @@ _news_not_configured_logged = False
 
 # Pares con futuros perpetuos disponibles en Pionex
 PARES_FUTURES_VALIDOS = {
-    "BTC_USDT", "ETH_USDT", "BNB_USDT", "SOL_USDT", "XRP_USDT",
-    "ADA_USDT", "DOGE_USDT", "MATIC_USDT", "DOT_USDT", "AVAX_USDT",
-    "LINK_USDT", "UNI_USDT", "ATOM_USDT", "LTC_USDT", "ETC_USDT",
-    "BCH_USDT", "APT_USDT", "OP_USDT", "ARB_USDT", "FIL_USDT",
-    "NEAR_USDT", "INJ_USDT", "SUI_USDT", "TRX_USDT", "TON_USDT",
-    "WLD_USDT", "IMX_USDT", "SAND_USDT", "MANA_USDT", "AAVE_USDT",
-    "MKR_USDT", "SNX_USDT", "CRV_USDT", "1INCH_USDT", "ENS_USDT",
-    "RUNE_USDT", "THETA_USDT", "FTM_USDT", "ALGO_USDT", "VET_USDT",
-    "EGLD_USDT", "XTZ_USDT", "ZEC_USDT", "DASH_USDT", "CHZ_USDT",
-    "HOT_USDT", "ZIL_USDT", "ENJ_USDT", "BAT_USDT", "STORJ_USDT",
-    "AGLD_USDT", "AEVO_USDT", "AI_USDT", "API3_USDT", "APE_USDT",
-    "ALICE_USDT", "AXL_USDT", "ACE_USDT", "ACH_USDT", "AUCTION_USDT",
-    "BLUR_USDT", "COMP_USDT", "CYBER_USDT", "DYDX_USDT", "FET_USDT",
-    "GALA_USDT", "GMX_USDT", "GRT_USDT", "ICP_USDT", "JTO_USDT",
-    "JUP_USDT", "KAVA_USDT", "LDO_USDT", "LINA_USDT", "LUNA_USDT",
-    "MAGIC_USDT", "MASK_USDT", "OCEAN_USDT", "PEOPLE_USDT", "PERP_USDT",
-    "PYTH_USDT", "RDNT_USDT", "RNDR_USDT", "SEI_USDT", "SHIB_USDT",
-    "SKL_USDT", "SSV_USDT", "STMX_USDT", "STX_USDT", "SUSHI_USDT",
-    "TIA_USDT", "WAXP_USDT", "YFI_USDT", "ZRX_USDT"
+    "BTC_USDT_PERP",
+    "ETH_USDT_PERP",
+    "BNB_USDT_PERP",
+    "SOL_USDT_PERP",
+    "XRP_USDT_PERP",
+    "ADA_USDT_PERP",
+    "DOGE_USDT_PERP",
+    "MATIC_USDT_PERP",
+    "DOT_USDT_PERP",
+    "AVAX_USDT_PERP",
+    "LINK_USDT_PERP",
+    "LTC_USDT_PERP",
+    "BCH_USDT_PERP",
+    "UNI_USDT_PERP",
+    "ATOM_USDT_PERP",
 }
 
 # Estado global del sistema
@@ -650,7 +646,12 @@ def _pionex_symbol_to_base_quote(symbol: str) -> tuple[str, str]:
     s = str(symbol or "")
     if "_" in s:
         base, quote = s.split("_", 1)
-        return base.strip(), quote.strip()
+        q = quote.strip()
+        if q.endswith("_PERP"):
+            q = q[:-5]
+        elif q.endswith("PERP") and q.startswith("USDT"):
+            q = "USDT"
+        return base.strip(), q
     return s.strip(), "USDT"
 
 
@@ -669,6 +670,13 @@ def _pionex_order_to_symbol(base: str, quote: str) -> str:
     if not q:
         q = "USDT"
     return f"{b}_{q}"
+
+
+def _pionex_normalize_market_symbol(symbol: str) -> str:
+    s = str(symbol or "").strip()
+    if s.endswith("_PERP"):
+        return s[:-5]
+    return s
 
 
 def _pionex_get_bot_orders(api_key: str, secret: str, status: str = "running") -> tuple[list, dict | None]:
@@ -895,7 +903,16 @@ def scan_pairs(api_key: str, secret: str, config: dict):
     tickers = response.get("data", {}).get("tickers", [])
 
     # Solo pares con futuros perpetuos válidos en Pionex
-    usdt_pairs = [t for t in tickers if t.get("symbol", "") in PARES_FUTURES_VALIDOS]
+    usdt_pairs = []
+    for t in tickers:
+        raw_symbol = t.get("symbol", "")
+        market_symbol = _pionex_normalize_market_symbol(raw_symbol)
+        futures_symbol = raw_symbol if str(raw_symbol).endswith("_PERP") else f"{raw_symbol}_PERP"
+        if futures_symbol in PARES_FUTURES_VALIDOS:
+            if market_symbol != raw_symbol:
+                t = dict(t)
+            t["symbol"] = market_symbol
+            usdt_pairs.append(t)
     add_log(f"Total pares futuros válidos encontrados: {len(usdt_pairs)}", "INFO")
 
     candidates = []
