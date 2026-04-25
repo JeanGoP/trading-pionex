@@ -1207,8 +1207,8 @@ def monitor_bots(api_key: str, secret: str, config: dict):
     bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list",
                                           params={"status": "RUNNING"})
     if not bots_pionex_response or not bots_pionex_response.get("result"):
-        add_log("Error obteniendo bots de Pionex", "ERROR")
-        return {"tipo": "monitor_real", "accion": "error_listado"}
+        add_log("No se pudo listar bots activos en Pionex; se omite reinversión automática por seguridad", "WARNING")
+        return {"tipo": "monitor_real", "accion": "listado_no_disponible"}
 
     bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
     pares_corriendo = {b.get("symbol") for b in bots_corriendo}
@@ -1434,7 +1434,10 @@ def run_cycle(api_key: str, secret: str, config: dict):
                 )
             finally:
                 db.close()
-            add_log("No se pudo verificar bots activos en Pionex; se usa DB para calcular límite (puede estar desfasado)", "WARNING")
+            if bots_actuales > 0:
+                add_log("No se pudo verificar bots activos en Pionex; se omite apertura por seguridad (hay bots ACTIVO en DB)", "WARNING")
+                return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "listado_no_disponible"}
+            add_log("No se pudo verificar bots activos en Pionex; se asume 0 y se permite apertura inicial (puede estar desfasado)", "WARNING")
 
     slots = max(0, max_bots - bots_actuales)
     if slots <= 0:
