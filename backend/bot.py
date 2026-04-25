@@ -620,6 +620,23 @@ def _pionex_check_private_access(api_key: str, secret: str) -> bool:
     return ok
 
 
+def _pionex_preflight_real_mode(api_key: str, secret: str) -> dict:
+    private_ok = _pionex_check_private_access(api_key, secret)
+    if not private_ok:
+        return {"ok": False, "reason": "private_api_not_ok"}
+
+    resp = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
+    if _pionex_is_route_not_found(resp):
+        sistema_estado["pionex_bot_api_supported"] = False
+        return {"ok": False, "reason": "bot_api_not_supported"}
+
+    if resp and resp.get("result"):
+        sistema_estado["pionex_bot_api_supported"] = True
+        return {"ok": True}
+
+    return {"ok": False, "reason": "bot_list_failed"}
+
+
 def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
     if response and response.get("result"):
@@ -1260,8 +1277,11 @@ def monitor_bots(api_key: str, secret: str, config: dict):
             return {"tipo": "monitor_prueba", "bots_activos": bots_activos, "max_bots": max_bots, "accion": "run_cycle", "ciclo": ciclo}
         return {"tipo": "monitor_prueba", "bots_activos": bots_activos, "max_bots": max_bots, "accion": "sin_accion"}
 
-    bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list",
-                                          params={"status": "RUNNING"})
+    if sistema_estado.get("pionex_bot_api_supported") is False:
+        add_log("Pionex Bot API no disponible (404). Se omite monitoreo de bots nativos.", "WARNING")
+        return {"tipo": "monitor_real", "accion": "bot_api_no_disponible"}
+
+    bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
     if not bots_pionex_response or not bots_pionex_response.get("result"):
         add_log("No se pudo listar bots activos en Pionex; se omite reinversión automática por seguridad", "WARNING")
         return {"tipo": "monitor_real", "accion": "listado_no_disponible"}
@@ -1563,6 +1583,22 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
     config_inicial = get_configuracion(db)
     db.close()
     loop_minutes = max(1, _cfg_int(config_inicial, "loop_interval_minutes", 10))
+    modo_prueba_inicial = config_inicial.get("modo_prueba", "true") == "true"
+    if not modo_prueba_inicial:
+        preflight = _pionex_preflight_real_mode(api_key, secret)
+        if not preflight.get("ok"):
+            reason = preflight.get("reason", "unknown")
+            if reason == "bot_api_not_supported":
+                add_log("Modo REAL detenido: Pionex no expone creación/listado de bots por API (404). Cambia a PRUEBA para seguir usando la herramienta.", "ERROR")
+                notify("⛔ <b>Modo REAL no disponible</b>\n\nPionex no permite crear/listar bots por API (404).\nCambia a <b>PRUEBA</b> para seguir usando la herramienta.")
+            elif reason == "private_api_not_ok":
+                add_log("Modo REAL detenido: no hay acceso a endpoints privados (balance). Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+                notify("⛔ <b>Modo REAL detenido</b>\n\nNo se pudo validar acceso privado (balance).\nRevisa API Key/Secret/permisos/IP whitelist.")
+            else:
+                add_log(f"Modo REAL detenido: no se pudo validar listado de bots en Pionex ({reason}).", "ERROR")
+                notify(f"⛔ <b>Modo REAL detenido</b>\n\nNo se pudo validar listado de bots en Pionex.\nMotivo: {reason}")
+            sistema_estado["activo"] = False
+            return
 
     notify(
         f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
