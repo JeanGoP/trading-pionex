@@ -733,6 +733,96 @@ def _pionex_fix_futures_grid_precision(
     return last_resp, last_data
 
 
+def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, config: dict) -> dict:
+    if not api_key or not secret:
+        return {"ok": False, "error": "missing_api_keys"}
+
+    sym = str(symbol_perp or "").strip()
+    if not sym:
+        return {"ok": False, "error": "missing_symbol"}
+    if not sym.endswith("_PERP"):
+        sym = f"{sym}_PERP"
+
+    if sym not in PARES_FUTURES_VALIDOS:
+        return {"ok": False, "error": "symbol_not_allowed", "symbol": sym}
+
+    if not _pionex_check_private_access(api_key, secret):
+        return {"ok": False, "error": "private_api_not_ok", "symbol": sym}
+
+    market_symbol = _pionex_normalize_market_symbol(sym)
+    price = get_precio_actual(api_key, secret, market_symbol)
+    if price <= 0:
+        return {"ok": False, "error": "price_not_available", "symbol": sym, "market_symbol": market_symbol}
+
+    try:
+        range_pct = float(config.get("price_range_pct", 5.0))
+    except Exception:
+        range_pct = 5.0
+    try:
+        investment = float(config.get("investment_usdt", 20))
+    except Exception:
+        investment = 20.0
+    try:
+        leverage = int(config.get("leverage", 2))
+    except Exception:
+        leverage = 2
+    try:
+        grid_count = int(config.get("grid_count", 60))
+    except Exception:
+        grid_count = 60
+
+    lower = round(price * (1 - range_pct / 100), 6)
+    upper = round(price * (1 + range_pct / 100), 6)
+
+    base_coin, quote_coin = _pionex_symbol_to_base_quote(market_symbol)
+    base_perp = _pionex_futures_base(base_coin)
+
+    bu_order_data = {
+        "top": _pionex_num_to_str(upper, 8),
+        "bottom": _pionex_num_to_str(lower, 8),
+        "row": int(grid_count),
+        "grid_type": "arithmetic",
+        "trend": "no_trend",
+        "leverage": int(leverage),
+        "extra_margin": False,
+        "quote_investment": _pionex_num_to_str(investment, 8),
+    }
+
+    check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
+    if _pionex_is_route_not_found(check_resp):
+        sistema_estado["pionex_bot_api_supported"] = False
+        return {
+            "ok": False,
+            "error": "bot_api_not_supported",
+            "symbol": sym,
+            "market_symbol": market_symbol,
+            "response": check_resp,
+        }
+
+    if not check_resp or not check_resp.get("result"):
+        msg = str((check_resp or {}).get("message") or "").lower()
+        if "not match quote precision" in msg:
+            fixed_resp, fixed_data = _pionex_fix_futures_grid_precision(
+                api_key, secret, base_perp, quote_coin, upper, lower, bu_order_data
+            )
+            check_resp = fixed_resp
+            bu_order_data = fixed_data
+
+    ok = bool(check_resp and check_resp.get("result"))
+    return {
+        "ok": ok,
+        "symbol": sym,
+        "market_symbol": market_symbol,
+        "price": price,
+        "lower": lower,
+        "upper": upper,
+        "base": base_perp,
+        "quote": quote_coin,
+        "buOrderData": bu_order_data,
+        "response": check_resp,
+    }
+
+
 def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
     if response and response.get("result"):

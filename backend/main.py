@@ -13,7 +13,7 @@ from database import (
     init_db, get_db, get_configuracion, actualizar_configuracion,
     get_estadisticas, SessionLocal, Bot, Ciclo, Ganancia
 )
-from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status, detener_bot
+from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status, detener_bot, pionex_test_futures_grid_check
 
 load_dotenv()
 
@@ -57,6 +57,14 @@ trading_task = None
 class ConfigUpdate(BaseModel):
     clave: str
     valor: str
+
+
+class PionexFuturesGridTest(BaseModel):
+    symbol: str
+    investment_usdt: Optional[float] = None
+    leverage: Optional[int] = None
+    grid_count: Optional[int] = None
+    price_range_pct: Optional[float] = None
 
 
 class SistemaAction(BaseModel):
@@ -223,6 +231,28 @@ async def controlar_sistema(action: SistemaAction):
 
     else:
         raise HTTPException(status_code=400, detail="Acción no válida")
+
+
+@app.post("/api/pionex/futuresGrid/check")
+async def pionex_futures_grid_check(body: PionexFuturesGridTest):
+    if not PIONEX_API_KEY or not PIONEX_SECRET:
+        raise HTTPException(status_code=400, detail="API Key de Pionex no configurada")
+
+    db = SessionLocal()
+    config = get_configuracion(db)
+    db.close()
+
+    if body.investment_usdt is not None:
+        config["investment_usdt"] = str(body.investment_usdt)
+    if body.leverage is not None:
+        config["leverage"] = str(body.leverage)
+    if body.grid_count is not None:
+        config["grid_count"] = str(body.grid_count)
+    if body.price_range_pct is not None:
+        config["price_range_pct"] = str(body.price_range_pct)
+
+    result = await asyncio.to_thread(pionex_test_futures_grid_check, PIONEX_API_KEY, PIONEX_SECRET, body.symbol, config)
+    return result
 
 
 # ============================================================

@@ -273,6 +273,36 @@
           </div>
 
           <div class="divider"></div>
+          <div style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Pionex</div>
+
+          <div class="config-item">
+            <label class="config-label">Probar creación de bot (Futures Grid)</label>
+            <select class="config-input" id="test-bot-symbol">
+              <option value="BTC_USDT_PERP">BTC_USDT_PERP</option>
+              <option value="ETH_USDT_PERP">ETH_USDT_PERP</option>
+              <option value="BNB_USDT_PERP">BNB_USDT_PERP</option>
+              <option value="SOL_USDT_PERP">SOL_USDT_PERP</option>
+              <option value="XRP_USDT_PERP">XRP_USDT_PERP</option>
+              <option value="ADA_USDT_PERP">ADA_USDT_PERP</option>
+              <option value="DOGE_USDT_PERP">DOGE_USDT_PERP</option>
+              <option value="MATIC_USDT_PERP">MATIC_USDT_PERP</option>
+              <option value="DOT_USDT_PERP">DOT_USDT_PERP</option>
+              <option value="AVAX_USDT_PERP">AVAX_USDT_PERP</option>
+              <option value="LINK_USDT_PERP">LINK_USDT_PERP</option>
+              <option value="LTC_USDT_PERP">LTC_USDT_PERP</option>
+              <option value="BCH_USDT_PERP">BCH_USDT_PERP</option>
+              <option value="UNI_USDT_PERP">UNI_USDT_PERP</option>
+              <option value="ATOM_USDT_PERP">ATOM_USDT_PERP</option>
+            </select>
+          </div>
+          <div class="config-item">
+            <button class="btn btn-outline" id="btn-test-bot" style="width:100%" onclick="probarCreacionBot()">Probar (checkParams)</button>
+          </div>
+          <div class="config-item">
+            <div id="test-bot-result" style="font-size:12px;color:var(--text2);white-space:pre-wrap">--</div>
+          </div>
+
+          <div class="divider"></div>
           <div style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Estrategia</div>
 
           <div class="config-item">
@@ -796,6 +826,42 @@
       aplicarIntervaloDesdeConfig(config);
       showNotification('Configuración guardada', 'success');
     } catch (e) { showNotification('Error guardando configuración', 'error'); }
+  }
+
+  async function probarCreacionBot() {
+    const btn = document.getElementById('btn-test-bot');
+    const out = document.getElementById('test-bot-result');
+    if (btn) btn.disabled = true;
+    if (out) out.textContent = 'Probando...';
+    try {
+      const payload = {
+        symbol: document.getElementById('test-bot-symbol')?.value || 'BTC_USDT_PERP',
+        investment_usdt: parseFloat(document.getElementById('cfg-investment')?.value || '0'),
+        leverage: parseInt(document.getElementById('cfg-leverage')?.value || '0', 10),
+        grid_count: parseInt(document.getElementById('cfg-grids')?.value || '0', 10),
+        price_range_pct: parseFloat(document.getElementById('cfg-price-range')?.value || '0'),
+      };
+
+      const resp = await fetch(`${API}/api/pionex/futuresGrid/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json().catch(() => ({}));
+
+      if (out) out.textContent = JSON.stringify(data, null, 2);
+      if (data && data.ok) {
+        showNotification('Pionex checkParams OK (se puede crear)', 'success');
+      } else {
+        const msg = data?.response?.message || data?.response?.code || data?.error || 'No se pudo validar';
+        showNotification(`CheckParams rechazado: ${msg}`, 'error');
+      }
+    } catch (e) {
+      if (out) out.textContent = String(e);
+      showNotification('Error probando creación de bot', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function showNotification(msg, type = 'info') {
