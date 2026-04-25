@@ -1490,6 +1490,11 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
     # Cargar pares activos desde DB para evitar duplicados al reiniciar
     cargar_pares_activos_desde_db()
 
+    db = SessionLocal()
+    config_inicial = get_configuracion(db)
+    db.close()
+    loop_minutes = max(1, _cfg_int(config_inicial, "loop_interval_minutes", 30))
+
     notify(
         f"🚀 <b>Sistema iniciado — Estrategia Profesional</b>\n\n"
         f"🎯 <b>Triple Confluencia:</b> RSI + MACD + Bollinger Bands\n"
@@ -1497,13 +1502,13 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
         f"👁 Seguimiento automático: <b>cada 4 horas</b>\n"
         f"📋 Reporte diario: <b>cada 24 horas</b>\n"
         f"⚙️ Modo: <b>{'PRUEBA' if sistema_estado['modo_prueba'] else 'REAL'}</b>\n"
-        f"⏰ Análisis: <b>cada 30 minutos</b>\n"
+        f"⏰ Análisis: <b>cada {loop_minutes} minutos</b>\n"
         f"🔒 Pares con futuros válidos: <b>{len(PARES_FUTURES_VALIDOS)}</b>"
     )
 
     ciclo_counter = 0
-    seguimiento_counter = 0
-    reporte_counter = 0
+    last_seguimiento_ts = 0.0
+    last_reporte_ts = 0.0
     last_heartbeat_ts = 0.0
     last_error_notify_ts = 0.0
 
@@ -1519,15 +1524,14 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             else:
                 step_result = await asyncio.to_thread(monitor_bots, api_key, secret, config)
 
-            seguimiento_counter += 1
-            if seguimiento_counter >= 8:
+            now_ts = time.time()
+            if now_ts - last_seguimiento_ts >= 4 * 3600:
                 await asyncio.to_thread(seguimiento_automatico, api_key, secret)
-                seguimiento_counter = 0
+                last_seguimiento_ts = now_ts
 
-            reporte_counter += 1
-            if reporte_counter >= 48:
+            if now_ts - last_reporte_ts >= 24 * 3600:
                 await asyncio.to_thread(reporte_diario)
-                reporte_counter = 0
+                last_reporte_ts = now_ts
 
             db = SessionLocal()
             stats = get_estadisticas(db)
@@ -1541,7 +1545,6 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             heartbeat_enabled = _cfg_bool(config, "telegram_heartbeat_enabled", True)
             heartbeat_minutes = _cfg_int(config, "telegram_heartbeat_minutes", 30)
             interval_s = max(60, heartbeat_minutes * 60)
-            now_ts = time.time()
             if heartbeat_enabled and (now_ts - last_heartbeat_ts) >= interval_s - 2:
                 modo = "PRUEBA" if config.get("modo_prueba", "true") == "true" else "REAL"
                 extra = ""
@@ -1584,7 +1587,8 @@ async def trading_loop(api_key: str, secret: str, telegram_token: str, telegram_
             })
 
             ciclo_counter += 1
-            await asyncio.sleep(1800)
+            loop_minutes = max(1, _cfg_int(config, "loop_interval_minutes", 30))
+            await asyncio.sleep(max(60, loop_minutes * 60))
 
         except Exception as e:
             add_log(f"Error en trading loop: {e}", "ERROR")
