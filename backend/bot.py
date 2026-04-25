@@ -682,6 +682,49 @@ def _pionex_get_bot_orders(api_key: str, secret: str, status: str = "running") -
     return results, resp
 
 
+def _pionex_check_futures_grid_params(api_key: str, secret: str, base_perp: str, quote: str, bu_order_data: dict) -> dict | None:
+    body = {"base": base_perp, "quote": quote, "buOrderData": bu_order_data}
+    return pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/checkParams", body=body)
+
+
+def _pionex_fix_futures_grid_precision(
+    api_key: str,
+    secret: str,
+    base_perp: str,
+    quote: str,
+    upper: float,
+    lower: float,
+    bu_order_data: dict,
+) -> tuple[dict | None, dict]:
+    last_resp = None
+    last_data = dict(bu_order_data or {})
+
+    for decimals in range(8, -1, -1):
+        top_s = _pionex_num_to_str(upper, decimals)
+        bottom_s = _pionex_num_to_str(lower, decimals)
+        try:
+            if float(top_s) <= float(bottom_s):
+                continue
+        except Exception:
+            continue
+
+        attempt = dict(last_data)
+        attempt["top"] = top_s
+        attempt["bottom"] = bottom_s
+
+        resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote, attempt)
+        last_resp = resp
+        last_data = attempt
+        if resp and resp.get("result"):
+            return resp, attempt
+
+        msg = str((resp or {}).get("message") or "").lower()
+        if "not match quote precision" not in msg:
+            break
+
+    return last_resp, last_data
+
+
 def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
     response = pionex_request(api_key, secret, "GET", "/api/v1/market/tickers")
     if response and response.get("result"):
@@ -1246,16 +1289,25 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             "quote_investment": _pionex_num_to_str(investment, 8),
         }
 
-        check_body = {"base": base_perp, "quote": quote_coin, "buOrderData": bu_order_data}
-        check_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/checkParams", body=check_body)
+        check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
         if _pionex_is_route_not_found(check_resp):
             sistema_estado["pionex_bot_api_supported"] = False
             add_log("Pionex Bot API (Beta) no disponible: /api/v1/bot/orders/futuresGrid/checkParams devolvió 404.", "ERROR")
             return None
         if not check_resp or not check_resp.get("result"):
-            add_log(f"Parámetros rechazados por Pionex (futuresGrid/checkParams): {str(check_resp)[:450]}", "ERROR")
-            return None
+            msg = str((check_resp or {}).get("message") or "").lower()
+            if "not match quote precision" in msg:
+                fixed_resp, fixed_data = _pionex_fix_futures_grid_precision(
+                    api_key, secret, base_perp, quote_coin, upper, lower, bu_order_data
+                )
+                check_resp = fixed_resp
+                bu_order_data = fixed_data
 
+            if not check_resp or not check_resp.get("result"):
+                add_log(f"Parámetros rechazados por Pionex (futuresGrid/checkParams): {str(check_resp)[:450]}", "ERROR")
+                return None
+
+        check_body = {"base": base_perp, "quote": quote_coin, "buOrderData": bu_order_data}
         create_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/create", body=check_body)
         if _pionex_is_route_not_found(create_resp):
             sistema_estado["pionex_bot_api_supported"] = False
