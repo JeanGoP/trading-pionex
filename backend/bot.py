@@ -809,6 +809,20 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
             bu_order_data = fixed_data
 
     ok = bool(check_resp and check_resp.get("result"))
+    min_investment = None
+    max_investment = None
+    if not ok:
+        data = (check_resp or {}).get("data") or {}
+        try:
+            if data.get("minInvestment") is not None:
+                min_investment = float(data.get("minInvestment"))
+        except Exception:
+            min_investment = None
+        try:
+            if data.get("maxInvestment") is not None:
+                max_investment = float(data.get("maxInvestment"))
+        except Exception:
+            max_investment = None
     return {
         "ok": ok,
         "symbol": sym,
@@ -819,6 +833,8 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
         "base": base_perp,
         "quote": quote_coin,
         "buOrderData": bu_order_data,
+        "minInvestment": min_investment,
+        "maxInvestment": max_investment,
         "response": check_resp,
     }
 

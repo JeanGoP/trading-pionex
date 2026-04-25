@@ -853,6 +853,13 @@
       if (data && data.ok) {
         showNotification('Pionex checkParams OK (se puede crear)', 'success');
       } else {
+        const minInv = data?.minInvestment ?? data?.response?.data?.minInvestment;
+        if (minInv != null && !Number.isNaN(parseFloat(minInv))) {
+          const v = parseFloat(minInv);
+          const invEl = document.getElementById('cfg-investment');
+          if (invEl) invEl.value = String(v);
+          showNotification(`Mínimo inversión para ese bot: ${v} USDT (se cargó en Inversión por bot; falta Guardar)`, 'info');
+        }
         const msg = data?.response?.message || data?.response?.code || data?.error || 'No se pudo validar';
         showNotification(`CheckParams rechazado: ${msg}`, 'error');
       }
