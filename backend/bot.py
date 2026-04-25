@@ -625,7 +625,7 @@ def _pionex_preflight_real_mode(api_key: str, secret: str) -> dict:
     if not private_ok:
         return {"ok": False, "reason": "private_api_not_ok"}
 
-    resp = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
+    resp = pionex_request(api_key, secret, "GET", "/api/v1/bot/orders", params={"status": "running"})
     if _pionex_is_route_not_found(resp):
         sistema_estado["pionex_bot_api_supported"] = False
         return {"ok": False, "reason": "bot_api_not_supported"}
@@ -635,6 +635,51 @@ def _pionex_preflight_real_mode(api_key: str, secret: str) -> dict:
         return {"ok": True}
 
     return {"ok": False, "reason": "bot_list_failed"}
+
+
+def _pionex_num_to_str(value: float, max_decimals: int = 8) -> str:
+    try:
+        s = f"{float(value):.{int(max_decimals)}f}"
+        s = s.rstrip("0").rstrip(".")
+        return s if s else "0"
+    except Exception:
+        return str(value)
+
+
+def _pionex_symbol_to_base_quote(symbol: str) -> tuple[str, str]:
+    s = str(symbol or "")
+    if "_" in s:
+        base, quote = s.split("_", 1)
+        return base.strip(), quote.strip()
+    return s.strip(), "USDT"
+
+
+def _pionex_futures_base(base: str) -> str:
+    b = str(base or "").strip()
+    if not b:
+        return b
+    return b if b.endswith(".PERP") else f"{b}.PERP"
+
+
+def _pionex_order_to_symbol(base: str, quote: str) -> str:
+    b = str(base or "").strip()
+    q = str(quote or "").strip()
+    if b.endswith(".PERP"):
+        b = b[:-5]
+    if not q:
+        q = "USDT"
+    return f"{b}_{q}"
+
+
+def _pionex_get_bot_orders(api_key: str, secret: str, status: str = "running") -> tuple[list, dict | None]:
+    resp = pionex_request(api_key, secret, "GET", "/api/v1/bot/orders", params={"status": status})
+    if _pionex_is_route_not_found(resp):
+        sistema_estado["pionex_bot_api_supported"] = False
+        return [], resp
+    results = []
+    if resp and resp.get("result"):
+        results = resp.get("data", {}).get("results", []) or []
+    return results, resp
 
 
 def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
@@ -702,6 +747,9 @@ def detener_bot(api_key: str, secret: str, bot_id: str) -> dict:
     db.close()
 
     endpoints = [
+        ("/api/v1/bot/orders/futuresGrid/cancel", {"buOrderId": bot_id}),
+        ("/api/v1/bot/orders/futuresGrid/cancel", {"buOrderId": bot_id, "closeSlippage": "0.01"}),
+        ("/api/v1/bot/orders/spotGrid/cancel", {"buOrderId": bot_id}),
         ("/api/v1/bot/terminate", {"botId": bot_id}),
         ("/api/v1/bot/stop", {"botId": bot_id}),
         ("/api/v1/bot/close", {"botId": bot_id}),
@@ -719,6 +767,8 @@ def detener_bot(api_key: str, secret: str, bot_id: str) -> dict:
         try:
             resp = pionex_request(api_key, secret, "POST", endpoint, body=body)
             last_resp = resp
+            if _pionex_is_route_not_found(resp) and endpoint.startswith("/api/v1/bot/orders/"):
+                sistema_estado["pionex_bot_api_supported"] = False
             if resp and resp.get("result"):
                 ok = True
                 used_endpoint = endpoint
@@ -1172,55 +1222,50 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
 
     else:
         if sistema_estado.get("pionex_bot_api_supported") is False:
-            add_log("Pionex Bot API no disponible (404). No se intentará crear bots nativos.", "ERROR")
-            return None
-
-        body = {
-            "symbol": symbol,
-            "type": bot_type,
-            "leverageLevel": leverage,
-            "lowerPrice": str(lower),
-            "upperPrice": str(upper),
-            "gridCount": grid_count,
-            "amount": str(investment),
-            "takeProfitRatio": str(take_profit / 100),
-            "stopLossRatio": str(stop_loss / 100),
-            "stopLossDelay": 5
-        }
-
-        response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
-        response_primary = response
-        response_fallback = None
-        used_type = bot_type
-
-        if _pionex_is_route_not_found(response_primary):
-            sistema_estado["pionex_bot_api_supported"] = False
-            private_ok = _pionex_check_private_access(api_key, secret)
-            if private_ok:
-                add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/create no existe (404). Pionex no expone creación/listado de bots por API.", "ERROR")
-            else:
-                add_log("Pionex respondió 404 en /api/v1/bot/create y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
-            return None
-
-        if (not response or not response.get("result")) and bot_type != "NEUTRAL_FUTURES_GRID":
-            add_log(f"{symbol}: tipo {bot_type} rechazado, fallback a NEUTRAL_FUTURES_GRID", "WARNING")
-            body["type"] = "NEUTRAL_FUTURES_GRID"
-            response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
-            response_fallback = response
-            used_type = "NEUTRAL_FUTURES_GRID"
-
-            if _pionex_is_route_not_found(response_fallback):
-                sistema_estado["pionex_bot_api_supported"] = False
-                private_ok = _pionex_check_private_access(api_key, secret)
-                if private_ok:
-                    add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/create no existe (404). Pionex no expone creación/listado de bots por API.", "ERROR")
-                else:
-                    add_log("Pionex respondió 404 en /api/v1/bot/create y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+            preflight = _pionex_preflight_real_mode(api_key, secret)
+            if not preflight.get("ok"):
+                add_log("Pionex Bot API no disponible (404). No se intentará crear bots nativos.", "ERROR")
                 return None
 
-        if response and response.get("result"):
-            bot_id = response.get("data", {}).get("botId", f"BOT_{int(time.time())}")
-            bot_data["bot_type"] = used_type
+        base_coin, quote_coin = _pionex_symbol_to_base_quote(symbol)
+        base_perp = _pionex_futures_base(base_coin)
+        trend = "no_trend"
+        if bot_type == "LONG_FUTURES_GRID":
+            trend = "long"
+        elif bot_type == "SHORT_FUTURES_GRID":
+            trend = "short"
+
+        bu_order_data = {
+            "top": _pionex_num_to_str(upper, 8),
+            "bottom": _pionex_num_to_str(lower, 8),
+            "row": int(grid_count),
+            "grid_type": "arithmetic",
+            "trend": trend,
+            "leverage": int(leverage),
+            "extra_margin": False,
+            "quote_investment": _pionex_num_to_str(investment, 8),
+        }
+
+        check_body = {"base": base_perp, "quote": quote_coin, "buOrderData": bu_order_data}
+        check_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/checkParams", body=check_body)
+        if _pionex_is_route_not_found(check_resp):
+            sistema_estado["pionex_bot_api_supported"] = False
+            add_log("Pionex Bot API (Beta) no disponible: /api/v1/bot/orders/futuresGrid/checkParams devolvió 404.", "ERROR")
+            return None
+        if not check_resp or not check_resp.get("result"):
+            add_log(f"Parámetros rechazados por Pionex (futuresGrid/checkParams): {str(check_resp)[:450]}", "ERROR")
+            return None
+
+        create_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/create", body=check_body)
+        if _pionex_is_route_not_found(create_resp):
+            sistema_estado["pionex_bot_api_supported"] = False
+            add_log("Pionex Bot API (Beta) no disponible: /api/v1/bot/orders/futuresGrid/create devolvió 404.", "ERROR")
+            return None
+
+        if create_resp and create_resp.get("result"):
+            data = create_resp.get("data", {}) or {}
+            bot_id = data.get("buOrderId") or data.get("botId") or data.get("id") or f"BOT_{int(time.time())}"
+            bot_data["bot_type"] = bot_type
             bot_data["bot_id"] = bot_id
             bot_data["estado"] = "ACTIVO"
 
@@ -1231,7 +1276,7 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             sistema_estado["bots_activos"][bot_id] = bot_data
             sistema_estado["pares_activos"].add(symbol)
 
-            add_log(f"Bot abierto: {symbol} | ID: {bot_id} | Tipo: {used_type}", "SUCCESS")
+            add_log(f"Bot abierto: {symbol} | ID: {bot_id} | Tipo: {bot_type}", "SUCCESS")
 
             notify(
                 f"🤖 <b>Bot abierto — Estrategia Pro</b>\n\n"
@@ -1240,23 +1285,15 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
                 f"📈 Rango: <b>${lower} — ${upper}</b>\n"
                 f"📊 Score: <b>{score_display}/100</b>\n"
                 f"📉 RSI: <b>{pair_info.get('rsi', 0)}</b>\n"
-                f"🧭 Tipo bot: <b>{used_type}</b>\n"
+                f"🧭 Tipo bot: <b>{bot_type}</b>\n"
                 f"📐 ADX: <b>{pair_info.get('adx', 0)}</b> | Bias: <b>{trend_bias}</b>\n"
                 f"🗞 Noticias: <b>{pair_info.get('news_summary', '—')}</b>\n"
                 f"🎯 Razones: <b>{pair_info.get('razones', '')}</b>"
             )
             return bot_id
-        else:
-            detail = str(response) if response is not None else "no_response"
-            p = str(response_primary) if response_primary is not None else "no_response"
-            f = str(response_fallback) if response_fallback is not None else ""
-            add_log(
-                f"Error abriendo bot en {symbol} | tipo={used_type} | "
-                f"amount={investment} lev={leverage} grids={grid_count} range={lower}-{upper} | "
-                f"resp={detail[:350]} | primary={p[:250]} | fallback={f[:250]}",
-                "ERROR"
-            )
-            return None
+
+        add_log(f"Error creando bot en Pionex (futuresGrid/create): {str(create_resp)[:450]}", "ERROR")
+        return None
 
 
 # ============================================================
@@ -1278,16 +1315,24 @@ def monitor_bots(api_key: str, secret: str, config: dict):
         return {"tipo": "monitor_prueba", "bots_activos": bots_activos, "max_bots": max_bots, "accion": "sin_accion"}
 
     if sistema_estado.get("pionex_bot_api_supported") is False:
-        add_log("Pionex Bot API no disponible (404). Se omite monitoreo de bots nativos.", "WARNING")
-        return {"tipo": "monitor_real", "accion": "bot_api_no_disponible"}
+        preflight = _pionex_preflight_real_mode(api_key, secret)
+        if not preflight.get("ok"):
+            add_log("Pionex Bot API no disponible (404). Se omite monitoreo de bots nativos.", "WARNING")
+            return {"tipo": "monitor_real", "accion": "bot_api_no_disponible"}
 
-    bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
+    orders, bots_pionex_response = _pionex_get_bot_orders(api_key, secret, status="running")
+    if _pionex_is_route_not_found(bots_pionex_response):
+        sistema_estado["pionex_bot_api_supported"] = False
+        add_log("Pionex Bot API (Beta) no disponible: /api/v1/bot/orders devolvió 404.", "ERROR")
+        return {"tipo": "monitor_real", "accion": "bot_api_no_disponible"}
     if not bots_pionex_response or not bots_pionex_response.get("result"):
         add_log("No se pudo listar bots activos en Pionex; se omite reinversión automática por seguridad", "WARNING")
         return {"tipo": "monitor_real", "accion": "listado_no_disponible"}
 
-    bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
-    pares_corriendo = {b.get("symbol") for b in bots_corriendo}
+    bots_corriendo = orders
+    pares_corriendo = set()
+    for o in bots_corriendo:
+        pares_corriendo.add(_pionex_order_to_symbol(o.get("base"), o.get("quote")))
     sistema_estado["pares_activos"] = pares_corriendo
     add_log(f"Bots activos en Pionex: {len(bots_corriendo)}/{max_bots}", "INFO")
 
@@ -1497,21 +1542,26 @@ def run_cycle(api_key: str, secret: str, config: dict):
         bots_actuales = len(sistema_estado.get("bots_activos", {}))
     else:
         if sistema_estado.get("pionex_bot_api_supported") is False:
-            add_log("Pionex Bot API no disponible (404). No se puede operar en REAL usando bots nativos.", "ERROR")
-            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "bot_api_no_disponible"}
+            preflight = _pionex_preflight_real_mode(api_key, secret)
+            if not preflight.get("ok"):
+                add_log("Pionex Bot API no disponible (404). No se puede operar en REAL usando bots nativos.", "ERROR")
+                return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "bot_api_no_disponible"}
 
-        bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
+        bots_corriendo, bots_pionex_response = _pionex_get_bot_orders(api_key, secret, status="running")
         if bots_pionex_response and bots_pionex_response.get("result"):
-            bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
             bots_actuales = len(bots_corriendo)
+            pares_corriendo = set()
+            for o in bots_corriendo:
+                pares_corriendo.add(_pionex_order_to_symbol(o.get("base"), o.get("quote")))
+            sistema_estado["pares_activos"] = pares_corriendo
         else:
             if _pionex_is_route_not_found(bots_pionex_response):
                 sistema_estado["pionex_bot_api_supported"] = False
                 private_ok = _pionex_check_private_access(api_key, secret)
                 if private_ok:
-                    add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/list no existe (404). Pionex no expone listado/gestión de bots por API.", "ERROR")
+                    add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/orders no existe (404). Revisa que estés usando la Bot API (Beta) y permisos Bot reading/trading.", "ERROR")
                 else:
-                    add_log("Pionex respondió 404 en /api/v1/bot/list y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+                    add_log("Pionex respondió 404 en /api/v1/bot/orders y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
                 return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "bot_api_no_disponible"}
 
             db = SessionLocal()
