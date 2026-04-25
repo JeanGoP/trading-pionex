@@ -81,6 +81,9 @@ sistema_estado = {
     "ultimo_reporte": None,
     "ultimo_heartbeat": None,
     "ultimo_seguimiento": None,
+    "pionex_private_ok": None,
+    "pionex_private_last_check_utc": None,
+    "pionex_bot_api_supported": None,
     "logs": [],
     "websocket_clients": set()
 }
@@ -584,6 +587,37 @@ def pionex_request(api_key: str, secret: str, method: str, endpoint: str, params
     except Exception as e:
         add_log(f"Error API Pionex: {e}", "ERROR")
         return None
+
+
+def _pionex_is_route_not_found(payload) -> bool:
+    try:
+        msg = ""
+        if isinstance(payload, dict):
+            msg = str(payload.get("error_msg") or payload.get("message") or payload.get("error") or "")
+        else:
+            msg = str(payload or "")
+        msg = msg.lower()
+        return "route not found" in msg or "404 route not found" in msg
+    except Exception:
+        return False
+
+
+def _pionex_check_private_access(api_key: str, secret: str) -> bool:
+    now_utc = datetime.utcnow()
+    last = sistema_estado.get("pionex_private_last_check_utc")
+    if last:
+        try:
+            last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            if (now_utc - last_dt).total_seconds() < 300:
+                return bool(sistema_estado.get("pionex_private_ok"))
+        except Exception:
+            pass
+
+    resp = pionex_request(api_key, secret, "GET", "/api/v1/account/balances")
+    ok = bool(resp and resp.get("result"))
+    sistema_estado["pionex_private_ok"] = ok
+    sistema_estado["pionex_private_last_check_utc"] = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+    return ok
 
 
 def get_precio_actual(api_key: str, secret: str, symbol: str) -> float:
@@ -1120,6 +1154,10 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         return bot_id
 
     else:
+        if sistema_estado.get("pionex_bot_api_supported") is False:
+            add_log("Pionex Bot API no disponible (404). No se intentará crear bots nativos.", "ERROR")
+            return None
+
         body = {
             "symbol": symbol,
             "type": bot_type,
@@ -1138,12 +1176,30 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
         response_fallback = None
         used_type = bot_type
 
+        if _pionex_is_route_not_found(response_primary):
+            sistema_estado["pionex_bot_api_supported"] = False
+            private_ok = _pionex_check_private_access(api_key, secret)
+            if private_ok:
+                add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/create no existe (404). Pionex no expone creación/listado de bots por API.", "ERROR")
+            else:
+                add_log("Pionex respondió 404 en /api/v1/bot/create y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+            return None
+
         if (not response or not response.get("result")) and bot_type != "NEUTRAL_FUTURES_GRID":
             add_log(f"{symbol}: tipo {bot_type} rechazado, fallback a NEUTRAL_FUTURES_GRID", "WARNING")
             body["type"] = "NEUTRAL_FUTURES_GRID"
             response = pionex_request(api_key, secret, "POST", "/api/v1/bot/create", body=body)
             response_fallback = response
             used_type = "NEUTRAL_FUTURES_GRID"
+
+            if _pionex_is_route_not_found(response_fallback):
+                sistema_estado["pionex_bot_api_supported"] = False
+                private_ok = _pionex_check_private_access(api_key, secret)
+                if private_ok:
+                    add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/create no existe (404). Pionex no expone creación/listado de bots por API.", "ERROR")
+                else:
+                    add_log("Pionex respondió 404 en /api/v1/bot/create y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+                return None
 
         if response and response.get("result"):
             bot_id = response.get("data", {}).get("botId", f"BOT_{int(time.time())}")
@@ -1420,11 +1476,24 @@ def run_cycle(api_key: str, secret: str, config: dict):
     if modo_prueba:
         bots_actuales = len(sistema_estado.get("bots_activos", {}))
     else:
+        if sistema_estado.get("pionex_bot_api_supported") is False:
+            add_log("Pionex Bot API no disponible (404). No se puede operar en REAL usando bots nativos.", "ERROR")
+            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "bot_api_no_disponible"}
+
         bots_pionex_response = pionex_request(api_key, secret, "GET", "/api/v1/bot/list", params={"status": "RUNNING"})
         if bots_pionex_response and bots_pionex_response.get("result"):
             bots_corriendo = bots_pionex_response.get("data", {}).get("bots", [])
             bots_actuales = len(bots_corriendo)
         else:
+            if _pionex_is_route_not_found(bots_pionex_response):
+                sistema_estado["pionex_bot_api_supported"] = False
+                private_ok = _pionex_check_private_access(api_key, secret)
+                if private_ok:
+                    add_log("Tu API Key responde en endpoints privados (balance OK), pero /api/v1/bot/list no existe (404). Pionex no expone listado/gestión de bots por API.", "ERROR")
+                else:
+                    add_log("Pionex respondió 404 en /api/v1/bot/list y además el balance no se pudo validar. Revisa API Key/Secret/permisos/IP whitelist.", "ERROR")
+                return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "bot_api_no_disponible"}
+
             db = SessionLocal()
             try:
                 bots_actuales = (
