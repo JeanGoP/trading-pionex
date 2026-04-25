@@ -267,6 +267,10 @@
             <label class="config-label">Máx bots simultáneos</label>
             <input type="number" class="config-input" id="cfg-maxbots" value="2">
           </div>
+          <div class="config-item">
+            <label class="config-label">Intervalo de verificación (min)</label>
+            <input type="number" class="config-input" id="cfg-loop-minutes" value="30" min="1" step="1">
+          </div>
 
           <div class="divider"></div>
           <div style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Estrategia</div>
@@ -381,7 +385,18 @@
   let gananciaData = [];
   let proximoAnalisis = null;
   let countdownInterval = null;
-  const INTERVALO_MS = 30 * 60 * 1000;
+  let intervaloMs = 30 * 60 * 1000;
+  let ultimoAnalisisActual = null;
+
+  function aplicarIntervaloDesdeConfig(config) {
+    if (!config) return;
+    const raw = config.loop_interval_minutes ?? config.loop_interval_minutos ?? config.loop_interval ?? null;
+    const minutes = Math.max(1, parseInt(raw, 10) || 30);
+    intervaloMs = minutes * 60 * 1000;
+    const el = document.getElementById('cfg-loop-minutes');
+    if (el) el.value = String(minutes);
+    if (ultimoAnalisisActual) iniciarCuentaRegresiva(ultimoAnalisisActual);
+  }
 
   // ============================================================
   // CUENTA REGRESIVA — sincronizada con fecha real del servidor
@@ -395,23 +410,23 @@
       // Convertir "2026-04-17 20:42:10" a timestamp
       const fechaServidor = new Date(ultimoAnalisisStr.replace(' ', 'T') + 'Z').getTime();
       const transcurrido = ahora - fechaServidor;
-      const restante = INTERVALO_MS - transcurrido;
+      const restante = intervaloMs - transcurrido;
       proximoAnalisis = restante > 0
         ? new Date(ahora + restante)
-        : new Date(ahora + INTERVALO_MS);
+        : new Date(ahora + intervaloMs);
     } else {
-      proximoAnalisis = new Date(ahora + INTERVALO_MS);
+      proximoAnalisis = new Date(ahora + intervaloMs);
     }
 
     countdownInterval = setInterval(() => {
       const diff = proximoAnalisis - Date.now();
       if (diff <= 0) {
-        proximoAnalisis = new Date(Date.now() + INTERVALO_MS);
+        proximoAnalisis = new Date(Date.now() + intervaloMs);
         return;
       }
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
-      const pct = ((INTERVALO_MS - diff) / INTERVALO_MS) * 100;
+      const pct = ((intervaloMs - diff) / intervaloMs) * 100;
       document.getElementById('countdown').textContent =
         `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       document.getElementById('progress-bar').style.width = pct + '%';
@@ -443,7 +458,9 @@
         actualizarEstado(msg.data.sistema_activo, msg.data.modo_prueba);
         actualizarOperativo(msg.data);
         if (msg.data.logs) renderLogs(msg.data.logs);
+        aplicarIntervaloDesdeConfig(msg.data.config);
         if (msg.data.ultimo_analisis) {
+          ultimoAnalisisActual = msg.data.ultimo_analisis;
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.data.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.data.ultimo_analisis;
           iniciarCuentaRegresiva(msg.data.ultimo_analisis);
@@ -455,6 +472,7 @@
         actualizarOperativo(msg);
         if (msg.logs) renderLogs(msg.logs);
         if (msg.ultimo_analisis) {
+          ultimoAnalisisActual = msg.ultimo_analisis;
           document.getElementById('ultimo-analisis').textContent = 'Último análisis: ' + msg.ultimo_analisis;
           document.getElementById('m-ultimo').textContent = 'Último: ' + msg.ultimo_analisis;
           iniciarCuentaRegresiva(msg.ultimo_analisis);
@@ -507,6 +525,7 @@
     setIfDefined('cfg-sl', config.stop_loss_pct);
     setIfDefined('cfg-grids', config.grid_count);
     setIfDefined('cfg-maxbots', config.max_active_bots);
+    setIfDefined('cfg-loop-minutes', config.loop_interval_minutes);
 
     setIfDefined('cfg-min-score', config.min_score);
     setIfDefined('cfg-rsi-min', config.rsi_min);
@@ -526,6 +545,8 @@
     if (config.modo_prueba !== undefined && config.modo_prueba !== null) {
       document.getElementById('toggle-prueba').checked = config.modo_prueba === 'true';
     }
+
+    aplicarIntervaloDesdeConfig(config);
   }
 
   function actualizarEstado(activo, modoPrueba) {
@@ -749,6 +770,7 @@
       stop_loss_pct: document.getElementById('cfg-sl').value,
       grid_count: document.getElementById('cfg-grids').value,
       max_active_bots: document.getElementById('cfg-maxbots').value,
+      loop_interval_minutes: document.getElementById('cfg-loop-minutes').value,
 
       min_score: document.getElementById('cfg-min-score').value,
       rsi_min: document.getElementById('cfg-rsi-min').value,
