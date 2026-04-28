@@ -728,6 +728,15 @@ def _pionex_check_futures_grid_params(api_key: str, secret: str, base_perp: str,
     return pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/checkParams", body=body)
 
 
+def _pionex_futures_grid_bu_order_data_for_create(bu_order_data: dict) -> dict:
+    data = dict(bu_order_data or {})
+    qi = data.pop("quote_investment", None)
+    data.pop("extra_margin", None)
+    if qi is not None:
+        data["quoteInvestment"] = qi
+    return data
+
+
 def _pionex_fix_futures_grid_precision(
     api_key: str,
     secret: str,
@@ -1492,8 +1501,12 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
                 add_log(f"Parámetros rechazados por Pionex (futuresGrid/checkParams): {str(check_resp)[:450]}", "ERROR")
                 return None
 
-        check_body = {"base": base_perp, "quote": quote_coin, "buOrderData": bu_order_data}
-        create_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/create", body=check_body)
+        create_body = {
+            "base": base_perp,
+            "quote": quote_coin,
+            "buOrderData": _pionex_futures_grid_bu_order_data_for_create(bu_order_data),
+        }
+        create_resp = pionex_request(api_key, secret, "POST", "/api/v1/bot/orders/futuresGrid/create", body=create_body)
         if _pionex_is_route_not_found(create_resp):
             sistema_estado["pionex_bot_api_supported"] = False
             add_log("Pionex Bot API (Beta) no disponible: /api/v1/bot/orders/futuresGrid/create devolvió 404.", "ERROR")
