@@ -1061,11 +1061,13 @@ def scan_pairs(api_key: str, secret: str, config: dict):
             if symbol in sistema_estado["pares_activos"]:
                 continue
 
-            volume = float(ticker.get("amount", 0))
+            amount = float(ticker.get("amount", 0) or 0)
+            volume_base = float(ticker.get("volume", 0) or 0)
             close = float(ticker.get("close", 0))
             open_price = float(ticker.get("open", 0))
 
-            if volume < min_volume:
+            volume_usdt = max(amount, volume_base * close) if close > 0 else amount
+            if volume_usdt < min_volume:
                 continue
             if close <= 0 or open_price <= 0:
                 continue
@@ -1076,7 +1078,7 @@ def scan_pairs(api_key: str, secret: str, config: dict):
 
             candidates.append({
                 "symbol": symbol,
-                "volume": volume,
+                "volume": volume_usdt,
                 "price": close,
                 "change_pct": round(change_pct, 2)
             })
@@ -1091,13 +1093,26 @@ def scan_pairs(api_key: str, secret: str, config: dict):
 # MODULO 2 - ANALIZADOR CON ESTRATEGIA PROFESIONAL
 # ============================================================
 def get_klines(api_key: str, secret: str, symbol: str, interval="60M", limit=100):
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
-    response = pionex_request(api_key, secret, "GET", "/api/v1/market/klines", params=params)
+    interval_raw = str(interval or "60M")
+    interval_candidates = []
+    for itv in [interval_raw, interval_raw.lower(), "60m", "1H", "1h"]:
+        if itv and itv not in interval_candidates:
+            interval_candidates.append(itv)
+
+    response = None
+    klines = []
+    for itv in interval_candidates:
+        params = {"symbol": symbol, "interval": itv, "limit": limit}
+        resp = pionex_request(api_key, secret, "GET", "/api/v1/market/klines", params=params)
+        if resp and resp.get("result"):
+            response = resp
+            klines = resp.get("data", {}).get("klines", [])
+            if klines:
+                break
 
     if not response or not response.get("result"):
         return None
 
-    klines = response.get("data", {}).get("klines", [])
     if not klines or len(klines) < 20:
         return None
 
@@ -1282,14 +1297,15 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
 # ============================================================
 def select_best_pairs(api_key: str, secret: str, candidates: list, config: dict):
     max_bots = int(config.get("max_active_bots", 2))
-    add_log(f"Analizando {min(len(candidates), 20)} candidatos con estrategia profesional...", "INFO")
+    analyze_limit = min(len(candidates), 50)
+    add_log(f"Analizando {analyze_limit} candidatos con estrategia profesional...", "INFO")
 
     analyzed = []
-    for pair in candidates[:20]:
+    for pair in candidates[:analyze_limit]:
         result = analyze_pair(api_key, secret, pair, config)
         if result:
             analyzed.append(result)
-        time.sleep(0.3)
+        time.sleep(0.15)
 
     if not analyzed:
         add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
