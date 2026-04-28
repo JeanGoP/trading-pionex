@@ -812,6 +812,10 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
         grid_count = int(config.get("grid_count", 60))
     except Exception:
         grid_count = 60
+    try:
+        take_profit = float(config.get("take_profit_pct", 1.0))
+    except Exception:
+        take_profit = 1.0
 
     lower = round(price * (1 - range_pct / 100), 6)
     upper = round(price * (1 + range_pct / 100), 6)
@@ -828,6 +832,8 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
         "leverage": int(leverage),
         "extra_margin": False,
         "quote_investment": _pionex_num_to_str(investment, 8),
+        "profitStopType": "profit_ratio",
+        "profitStop": _pionex_num_to_str(max(0.0, take_profit) / 100.0, 8),
     }
 
     check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
@@ -1468,6 +1474,8 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             "leverage": int(leverage),
             "extra_margin": False,
             "quote_investment": _pionex_num_to_str(investment, 8),
+            "profitStopType": "profit_ratio",
+            "profitStop": _pionex_num_to_str(max(0.0, take_profit) / 100.0, 8),
         }
 
         check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
