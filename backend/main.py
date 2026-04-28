@@ -24,6 +24,7 @@ from bot import (
     detener_bot,
     pionex_test_futures_grid_check,
     _pionex_get_bot_orders,
+    _pionex_order_to_symbol,
 )
 
 load_dotenv()
@@ -318,19 +319,25 @@ async def get_bots(estado: Optional[str] = None, limit: int = 50):
     db.close()
 
     running_ids = set()
+    running_symbol_by_id = {}
     if str(config.get("modo_prueba", "true")).strip().lower() == "false" and PIONEX_API_KEY and PIONEX_SECRET:
         orders, resp = _pionex_get_bot_orders(PIONEX_API_KEY, PIONEX_SECRET, status="running")
         if resp and resp.get("result"):
             for o in orders:
+                base = str(o.get("base") or "")
+                if ".PERP" not in base:
+                    continue
                 bid = o.get("buOrderId") or o.get("botId") or o.get("id")
                 if bid:
-                    running_ids.add(str(bid))
+                    bid_s = str(bid)
+                    running_ids.add(bid_s)
+                    running_symbol_by_id[bid_s] = _pionex_order_to_symbol(o.get("base"), o.get("quote"))
 
     return [
         {
             "id": b.id,
             "bot_id": b.bot_id,
-            "symbol": b.symbol,
+            "symbol": running_symbol_by_id.get(str(b.bot_id), b.symbol),
             "precio_entrada": b.precio_entrada,
             "lower_price": b.lower_price,
             "upper_price": b.upper_price,
