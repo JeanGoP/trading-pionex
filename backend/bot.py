@@ -1171,6 +1171,17 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
             except Exception:
                 return default
 
+        def _cfg_bool(key: str, default: bool) -> bool:
+            val = config.get(key, default)
+            if isinstance(val, bool):
+                return val
+            s = str(val).strip().lower()
+            if s in {"1", "true", "yes", "y", "on"}:
+                return True
+            if s in {"0", "false", "no", "n", "off"}:
+                return False
+            return default
+
         rsi_min = _cfg_float("rsi_min", 35.0)
         rsi_max = _cfg_float("rsi_max", 65.0)
         min_score = _cfg_int("min_score", 75)
@@ -1202,8 +1213,10 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         precio_actual = df["close"].iloc[-1]
         distancia_media = abs(precio_actual - bb_mid) / bb_mid * 100
 
-        ema50 = EMAIndicator(close=df["close"], window=50).ema_indicator().iloc[-1]
-        ema20 = EMAIndicator(close=df["close"], window=20).ema_indicator().iloc[-1]
+        ema50_series = EMAIndicator(close=df["close"], window=50).ema_indicator()
+        ema20_series = EMAIndicator(close=df["close"], window=20).ema_indicator()
+        ema50 = ema50_series.iloc[-1]
+        ema20 = ema20_series.iloc[-1]
         precio_sobre_ema20 = precio_actual > ema20
         precio_sobre_ema50 = precio_actual > ema50
         ema_tendencia = ema20 > ema50
@@ -1214,6 +1227,60 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         atr_pct = (atr / precio_actual) * 100
 
         adx = ADXIndicator(high=df["high"], low=df["low"], close=df["close"], window=14).adx().iloc[-1]
+
+        slope_window = min(_cfg_int("trend_slope_window", 5), max(2, len(df) - 2))
+        ema20_prev = float(ema20_series.iloc[-(slope_window + 1)])
+        ema50_prev = float(ema50_series.iloc[-(slope_window + 1)])
+        ema20_slope_pct = ((float(ema20) - ema20_prev) / ema20_prev * 100) if ema20_prev else 0.0
+        ema50_slope_pct = ((float(ema50) - ema50_prev) / ema50_prev * 100) if ema50_prev else 0.0
+
+        lookback = min(_cfg_int("zones_lookback", 96), len(df) - 2)
+        pivot_w = max(2, _cfg_int("pivot_window", 3))
+        recent = df.tail(lookback)
+        base_res = float(recent["high"].max())
+        base_sup = float(recent["low"].min())
+        highs = recent["high"].reset_index(drop=True)
+        lows = recent["low"].reset_index(drop=True)
+        pivot_highs = []
+        pivot_lows = []
+        if len(recent) > pivot_w * 2 + 1:
+            for i in range(pivot_w, len(recent) - pivot_w):
+                h = float(highs.iloc[i])
+                l = float(lows.iloc[i])
+                if h == float(highs.iloc[i - pivot_w : i + pivot_w + 1].max()):
+                    pivot_highs.append(h)
+                if l == float(lows.iloc[i - pivot_w : i + pivot_w + 1].min()):
+                    pivot_lows.append(l)
+
+        resistance_candidates = [base_res] + pivot_highs
+        support_candidates = [base_sup] + pivot_lows
+
+        resistance_above = [r for r in resistance_candidates if r >= precio_actual]
+        support_below = [s for s in support_candidates if s <= precio_actual]
+        resistance = min(resistance_above) if resistance_above else base_res
+        support = max(support_below) if support_below else base_sup
+        if not (resistance > support > 0):
+            resistance = base_res
+            support = base_sup
+        zone_width_pct = ((resistance - support) / precio_actual * 100) if precio_actual else 0.0
+        pos_in_range = ((precio_actual - support) / (resistance - support)) if resistance > support else 0.5
+
+        avoid_false_breakouts = _cfg_bool("avoid_false_breakouts", True)
+        false_breakout_n = max(3, _cfg_int("false_breakout_lookback", 6))
+        thr_pct = _cfg_float("false_breakout_threshold_pct", max(0.2, atr_pct * 0.15))
+        thr = max(0.0, thr_pct) / 100.0
+        recent_fb = df.tail(false_breakout_n)
+        last_close = float(df["close"].iloc[-1])
+        max_high = float(recent_fb["high"].max())
+        min_low = float(recent_fb["low"].min())
+        bull_trap = (max_high > resistance * (1 + thr)) and (last_close < resistance)
+        bear_trap = (min_low < support * (1 - thr)) and (last_close > support)
+        if (bull_trap or bear_trap) and avoid_false_breakouts:
+            add_log(
+                f"{symbol}: posible rompimiento falso detectado (zona S/R) - descartado",
+                "WARNING",
+            )
+            return None
 
         vol_avg = df["volume"].tail(20).mean()
         vol_current = df["volume"].iloc[-1]
@@ -1263,6 +1330,19 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         elif precio_sobre_ema20:
             score += 5
 
+        if zone_width_pct >= _cfg_float("zone_width_min_pct", 1.5):
+            if 0.25 <= pos_in_range <= 0.75:
+                score += 10
+                razones.append("Zona estable (S/R)")
+            elif pos_in_range < 0.25:
+                score += 8
+                razones.append("Cerca soporte (zona)")
+            elif pos_in_range > 0.75:
+                score += 8
+                razones.append("Cerca resistencia (zona)")
+        else:
+            score -= 10
+
         if adx_min > 0 and adx >= adx_min:
             score += 5
             razones.append(f"ADX fuerte ({round(adx,1)})")
@@ -1288,7 +1368,12 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
         if score < min_score:
             return None
 
-        trend_bias = "bullish" if (ema20 > ema50 and precio_actual > ema20) else ("bearish" if (ema20 < ema50 and precio_actual < ema20) else "sideways")
+        if ema20 > ema50 and precio_actual > ema20 and ema20_slope_pct > 0 and ema50_slope_pct >= 0:
+            trend_bias = "bullish"
+        elif ema20 < ema50 and precio_actual < ema20 and ema20_slope_pct < 0 and ema50_slope_pct <= 0:
+            trend_bias = "bearish"
+        else:
+            trend_bias = "sideways"
 
         return {
             **pair_info,
@@ -1303,6 +1388,9 @@ def analyze_pair(api_key: str, secret: str, pair_info: dict, config: dict):
             "ema20": round(float(ema20), 6),
             "ema50": round(float(ema50), 6),
             "trend_bias": trend_bias,
+            "support": round(float(support), 8),
+            "resistance": round(float(resistance), 8),
+            "pos_in_range": round(float(pos_in_range), 4),
             "vol_ratio": round(vol_ratio, 2),
             "score": score,
             "razones": ", ".join(razones)
