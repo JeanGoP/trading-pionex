@@ -816,6 +816,10 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
         take_profit = float(config.get("take_profit_pct", 1.0))
     except Exception:
         take_profit = 1.0
+    try:
+        stop_loss = float(config.get("stop_loss_pct", 5.0))
+    except Exception:
+        stop_loss = 5.0
 
     lower = round(price * (1 - range_pct / 100), 6)
     upper = round(price * (1 + range_pct / 100), 6)
@@ -834,6 +838,8 @@ def pionex_test_futures_grid_check(api_key: str, secret: str, symbol_perp: str, 
         "quote_investment": _pionex_num_to_str(investment, 8),
         "profitStopType": "profit_ratio",
         "profitStop": _pionex_num_to_str(max(0.0, take_profit) / 100.0, 8),
+        "lossStopType": "price",
+        "lossStop": _pionex_num_to_str(max(0.0, min(lower, price * (1 - max(0.0, stop_loss) / 100.0))), 8),
     }
 
     check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
@@ -1464,6 +1470,8 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             trend = "long"
         elif bot_type == "SHORT_FUTURES_GRID":
             trend = "short"
+        stop_loss_down = max(0.0, min(lower, price * (1 - max(0.0, stop_loss) / 100.0)))
+        stop_loss_up = max(0.0, max(upper, price * (1 + max(0.0, stop_loss) / 100.0)))
 
         bu_order_data = {
             "top": _pionex_num_to_str(upper, 8),
@@ -1476,7 +1484,11 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
             "quote_investment": _pionex_num_to_str(investment, 8),
             "profitStopType": "profit_ratio",
             "profitStop": _pionex_num_to_str(max(0.0, take_profit) / 100.0, 8),
+            "lossStopType": "price",
+            "lossStop": _pionex_num_to_str(stop_loss_down if trend != "short" else stop_loss_up, 8),
         }
+        if trend == "no_trend":
+            bu_order_data["lossStopHigh"] = _pionex_num_to_str(stop_loss_up, 8)
 
         check_resp = _pionex_check_futures_grid_params(api_key, secret, base_perp, quote_coin, bu_order_data)
         if _pionex_is_route_not_found(check_resp):
