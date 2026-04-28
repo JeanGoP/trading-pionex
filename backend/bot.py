@@ -1952,16 +1952,47 @@ def run_cycle(api_key: str, secret: str, config: dict):
 
     candidates = scan_pairs(api_key, secret, config)
     if not candidates:
-        add_log("No se encontraron candidatos", "WARNING")
-        return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_candidatos"}
+        if _cfg_bool(config, "auto_relax_enabled", True):
+            relaxed_scan = dict(config)
+            relaxed_scan["min_volume_24h"] = str(min(_cfg_float(config, "min_volume_24h", 5000000), 1000000))
+            relaxed_scan["min_volatility"] = str(min(_cfg_float(config, "min_volatility", 2.0), 1.0))
+            relaxed_scan["max_volatility"] = str(max(_cfg_float(config, "max_volatility", 8.0), 15.0))
+            candidates = scan_pairs(api_key, secret, relaxed_scan)
+            if candidates:
+                add_log("Candidatos encontrados con escaneo relajado (fallback)", "WARNING")
+
+        if not candidates:
+            add_log("No se encontraron candidatos", "WARNING")
+            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": 0, "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_candidatos"}
 
     config_limitada = dict(config)
     config_limitada["max_active_bots"] = str(min(len(candidates), max(slots, 1) * 5))
     best_pairs = select_best_pairs(api_key, secret, candidates, config_limitada)
     if not best_pairs:
-        add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
-        notify("⚠️ <b>Ningún par pasó la estrategia profesional</b>\nEl sistema seguirá monitoreando.")
-        return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": len(candidates), "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_seleccion"}
+        if _cfg_bool(config, "auto_relax_enabled", True):
+            relaxed = dict(config_limitada)
+            relaxed.update({
+                "min_score": str(min(_cfg_int(config, "min_score", 75), 60)),
+                "rsi_min": str(min(_cfg_float(config, "rsi_min", 35.0), 30.0)),
+                "rsi_max": str(max(_cfg_float(config, "rsi_max", 65.0), 70.0)),
+                "adx_min": str(min(_cfg_float(config, "adx_min", 15.0), 10.0)),
+                "bb_width_min": str(min(_cfg_float(config, "bb_width_min", 2.0), 1.0)),
+                "bb_width_max": str(max(_cfg_float(config, "bb_width_max", 6.0), 9.0)),
+                "max_atr_pct": str(max(_cfg_float(config, "max_atr_pct", 7.0), 10.0)),
+                "distancia_media_max": str(max(_cfg_float(config, "distancia_media_max", 1.5), 2.5)),
+                "vol_ratio_min": str(min(_cfg_float(config, "vol_ratio_min", 1.0), 0.8)),
+                "news_enabled": "false",
+                "avoid_false_breakouts": "false",
+                "zone_width_min_pct": str(min(_cfg_float(config, "zone_width_min_pct", 1.5), 0.8)),
+            })
+            best_pairs = select_best_pairs(api_key, secret, candidates, relaxed)
+            if best_pairs:
+                add_log("Selección lograda con análisis relajado (fallback)", "WARNING")
+
+        if not best_pairs:
+            add_log("Ningún par pasó el análisis de triple confluencia", "WARNING")
+            notify("⚠️ <b>Ningún par pasó la estrategia profesional</b>\nEl sistema seguirá monitoreando.")
+            return {"ciclo": ciclo_num, "modo_prueba": modo_prueba, "candidatos": len(candidates), "seleccionados": 0, "bots_abiertos": 0, "resultado": "sin_seleccion"}
 
     bots_abiertos = 0
     for pair in best_pairs:
