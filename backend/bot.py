@@ -1534,7 +1534,13 @@ def abrir_bot(api_key: str, secret: str, pair_info: dict, config: dict):
 
         if create_resp and create_resp.get("result"):
             data = create_resp.get("data", {}) or {}
-            bot_id = data.get("buOrderId") or data.get("botId") or data.get("id") or f"BOT_{int(time.time())}"
+            bot_id = data.get("buOrderId") or data.get("botId") or data.get("id")
+            if not bot_id and isinstance(data.get("buOrderData"), dict):
+                bu = data.get("buOrderData") or {}
+                bot_id = bu.get("buOrderId") or bu.get("botId") or bu.get("id")
+            if not bot_id:
+                add_log(f"Creación devuelta como OK pero sin buOrderId: {str(create_resp)[:450]}", "ERROR")
+                return None
             bot_data["bot_type"] = bot_type
             bot_data["bot_id"] = bot_id
             bot_data["estado"] = "ACTIVO"

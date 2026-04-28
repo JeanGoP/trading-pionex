@@ -13,7 +13,18 @@ from database import (
     init_db, get_db, get_configuracion, actualizar_configuracion,
     get_estadisticas, SessionLocal, Bot, Ciclo, Ganancia
 )
-from bot import sistema_estado, trading_loop, add_log, run_cycle, monitor_bots, send_telegram, get_telegram_status, detener_bot, pionex_test_futures_grid_check
+from bot import (
+    sistema_estado,
+    trading_loop,
+    add_log,
+    run_cycle,
+    monitor_bots,
+    send_telegram,
+    get_telegram_status,
+    detener_bot,
+    pionex_test_futures_grid_check,
+    _pionex_get_bot_orders,
+)
 
 load_dotenv()
 
@@ -299,11 +310,21 @@ async def update_config_batch(updates: dict):
 @app.get("/api/bots")
 async def get_bots(estado: Optional[str] = None, limit: int = 50):
     db = SessionLocal()
+    config = get_configuracion(db)
     query = db.query(Bot)
     if estado:
         query = query.filter(Bot.estado == estado)
     bots = query.order_by(Bot.fecha_apertura.desc()).limit(limit).all()
     db.close()
+
+    running_ids = set()
+    if str(config.get("modo_prueba", "true")).strip().lower() == "false" and PIONEX_API_KEY and PIONEX_SECRET:
+        orders, resp = _pionex_get_bot_orders(PIONEX_API_KEY, PIONEX_SECRET, status="running")
+        if resp and resp.get("result"):
+            for o in orders:
+                bid = o.get("buOrderId") or o.get("botId") or o.get("id")
+                if bid:
+                    running_ids.add(str(bid))
 
     return [
         {
@@ -322,7 +343,11 @@ async def get_bots(estado: Optional[str] = None, limit: int = 50):
             "rsi": b.rsi,
             "bb_width": b.bb_width,
             "bot_type": b.bot_type or "NEUTRAL_FUTURES_GRID",
-            "estado": b.estado,
+            "estado": (
+                ("NO_EN_PIONEX" if str(b.bot_id) not in running_ids else "ACTIVO")
+                if (str(config.get("modo_prueba", "true")).strip().lower() == "false" and not b.modo_prueba and b.estado == "ACTIVO" and running_ids)
+                else b.estado
+            ),
             "ganancia": b.ganancia,
             "ganancia_pct": b.ganancia_pct,
             "modo_prueba": b.modo_prueba,
